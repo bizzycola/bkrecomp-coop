@@ -1,37 +1,44 @@
-# Banjo-Kazooie: Recompiled Mod Template
+# Banjo-Kazooie Co-Op Mod
 
-This is an example mod for Banjo-Kazooie: Recompiled that can be used as a template for creating mods. It has a basic build system, headers, sample code, and a mod config toml.
+This is the recomp mod code for the Banjo-Kazooie Recomp co-op mod.
+It's based both on the BK mod template, and also the [LT-Schmiddy MM Recomp Mod Template](https://github.com/LT-Schmiddy/SchmiddysMMRecompModTemplate) from which I borrowed all the python build tools.
 
-### Writing mods
-See [this document](https://hackmd.io/fMDiGEJ9TBSjomuZZOgzNg) for an explanation of the modding framework, including how to write function patches and perform interop between different mods.
+The following build sections are like-for-like from the MM mod template.
 
-### Tools
-You'll need to install `clang` and `make` to build this template.
-* On Windows, using [chocolatey](https://chocolatey.org/) to install both is recommended. The packages are `llvm` and `make` respectively.
-  * The LLVM 19.1.0 [llvm-project](https://github.com/llvm/llvm-project) release binary, which is also what chocolatey provides, does not support MIPS correctly. The solution is to install 18.1.8 instead, which can be done in chocolatey by specifying `--version 18.1.8` or by downloading the 18.1.8 release directly.
-* On Linux, these can both be installed using your distro's package manager.
-* On MacOS, these can both be installed using Homebrew. Apple clang won't work, as you need a mips target for building the mod code.
+## Tools
+
+This template has somewhat different requirements from the default mod template. In order to run it, you'll need the following:
+
+* `make`
+* `python` (or `python3` on POSIX systems).
+* `cmake`
+* `ninja`
 
 On Linux and MacOS, you'll need to also ensure that you have the `zip` utility installed.
 
-You'll also need a copy of the `RecompModTool` utility from the [N64Recomp](https://github.com/N64Recomp/N64Recomp) repository. A prebuilt version is available for Windows and Linux in the GitHub release.
+All of these can (and should) be installed via using [chocolatey](https://chocolatey.org/) on Windows, Homebrew on MacOS, or your distro's package manager on Linux.
 
-### Building
-* First, run `make` (with an optional job count) to build the mod code itself.
-* Next, run the `RecompModTool` utility with `mod.toml` as the first argument and the build dir (`build` in the case of this template) as the second argument.
-  * This will produce your mod's `.nrm` file in the build folder.
-  * If you're on MacOS, you may need to specify the path to the `clang` and `ld.lld` binaries using the `CC` and `LD` environment variables, respectively.
+**You do NOT need the `RecompModTool` tool or any additional compilers installed. The build scripting will download all of these for you.**
 
-### Updating the Banjo-Kazooie Decompilation Submodule
-Mods can also be made with newer versions of the Banjo-Kazooie decompilation instead of the commit targeted by this repo's submodule.
-To update the commit of the decompilation that you're targeting, follow these steps:
-* Build the [N64Recomp](https://github.com/N64Recomp/N64Recomp) repo and copy the N64Recomp executable to the root of this repository.
-* Build the version of the Banjo-Kazooie decompilation that you want to update to and copy the resulting .elf file to the root of this repository.
-* Update the `bk-decomp` submodule in your clone of this repo to point to the commit you built in the previous step.
-* Run `N64Recomp generate_symbols.toml --dump-context`
-* Rename `dump.toml` and `data_dump.toml` to `bk.us.rev1.syms.toml` and `bk.us.rev1.datasyms.toml` respectively.
-  * Place both files in the `BanjoRecompSyms` folder.
-* Try building.
-  * If it succeeds, you're done.
-  * If RecompModTool fails due to a function being "marked as a patch but not existing in the original ROM", it's likely that function you're patching was renamed in the Banjo-Kazooie decompilation.
-    * Find the relevant function in the map file for the old decomp commit, then go to that address in the new map file, and update the reference to this function in your code with the new name.
+The default configuration (as well as the example configurations) will download the N64RecompEssentials package from [here](https://github.com/LT-Schmiddy/n64recomp-clang)
+for your platform, which contains the `RecompModTool` and the MIPS-only LLVM 21 `clang` and `ld.lld` compiler and linker pair for your system.
+
+It will also download Zig 0.14 for project configurations that require it. This is done because Zig's packaging is inconsistent across ecosystems, but the compiler
+itself is thankfully small.
+
+## Building
+
+TL;DR: Run `git submodule update --init --recursive` to make sure you've clones all submodules. Then, run `./modbuild.py` to prepare a debug build.
+Run `./modbuild.py thunderstore` to create a Thunderstore package.
+
+Due to issues where certain complex tasks become difficult to do in a cross-platform way using Make (and trying invoke Python functions from Make resulted in some
+of the worse spaghetti code I've ever written), I've decided to not have Make be the entrypoint for the build process. Instead, I've turned to a lightweight,
+Make-inspired Python library called `pyinvoke` to help me create an all-inclusive build script: `modbuild.py`. This script is capable of building the entire project
+from scratch, or simply running parts of the build process depending on the subcommands and their arguments.
+
+You can run `./modbuild.py -h` or `./modbuild.py [subcommand] -h` for usage information on the script and various subcommands.
+
+All commands are defined in `tasks.py`, in accordance to the `pyinvoke` library. See that documentation at
+[https://docs.pyinvoke.org/en/stable/](https://docs.pyinvoke.org/en/stable/) for info on how to define additional commands.
+
+(Don't worry, there are no Python packages you need to install. All of the required Python code has been incorperated into this template).

@@ -1,3 +1,10 @@
+// =========================================================================== //
+// This is the recomp mod file.
+//
+// It handles all game code, and calls our lib_main functions as needed
+// to handle networking.
+// =========================================================================== //
+
 #include "modding.h"
 #include "functions.h"
 #include "variables.h"
@@ -9,9 +16,8 @@ extern void jiggyscore_setCollected(int levelid, int jiggy_id);
 extern int jiggyscore_isCollected(int levelid, int jiggy_id);
 extern void item_adjustByDiffWithoutHud(int item, int diff);
 
-//extern s32 bkrecomp_note_saving_active();
-//extern s32 bkrecomp_note_saving_enabled();
 
+// Import functions from lib_main
 RECOMP_IMPORT(".", int net_init(const char* host, const char* username, const char* lobby_name, const char* password));
 RECOMP_IMPORT(".", int net_update(void));
 RECOMP_IMPORT(".", int net_test_udp(void));
@@ -24,14 +30,16 @@ RECOMP_IMPORT(".", int net_msg_get_data_chunk(int offset));
 RECOMP_IMPORT(".", int net_msg_get_data_int(int index));
 RECOMP_IMPORT(".", int net_msg_consume(void));
 
+// Recomp imports
 RECOMP_IMPORT("*", s32 bkrecomp_note_saving_active());
 RECOMP_IMPORT("*", s32 bkrecomp_note_saving_enabled());
 
 
-// sync funcs
+// Sync-related functions from lib_main
 RECOMP_IMPORT(".", int net_send_jiggy(int level_id, int jiggy_id));
 
-
+// most of these are defined by lib_packets now and can probably
+// be removed
 #define MSGTYPE_NONE                0
 #define MSGTYPE_PLAYER_CONNECTED    1
 #define MSGTYPE_PLAYER_DISCONNECTED 2
@@ -43,9 +51,13 @@ RECOMP_IMPORT(".", int net_send_jiggy(int level_id, int jiggy_id));
 #define MSGTYPE_MUMBO_TOKEN_COLLECTED 13
 #define MSGTYPE_JINJO_COLLECTED     14
 
+// Some consts for the message queue
+// which queues messages shown so they don't overlap
+// or replace eachother
 #define UI_MSG_QUEUE_SIZE 16
 #define UI_MSG_MAX_LENGTH 128
 #define UI_MSG_DISPLAY_FRAMES 180
+
 
 typedef struct {
     char messages[UI_MSG_QUEUE_SIZE][UI_MSG_MAX_LENGTH];
@@ -59,6 +71,9 @@ static RecompuiContext ui_msg_context = NULL;
 static int ui_msg_display_timer = 0;
 static int ui_msg_is_visible = 0;
 
+/**
+ * Queue a message to be shown onscreen
+ */
 static void UIQueueMessage(const char* message) {
     if (ui_msg_queue.count >= UI_MSG_QUEUE_SIZE) {
         ui_msg_queue.tail = (ui_msg_queue.tail + 1) % UI_MSG_QUEUE_SIZE;
@@ -76,6 +91,9 @@ static void UIQueueMessage(const char* message) {
     ui_msg_queue.count++;
 }
 
+/**
+ * Dequeues a message from the queue and returns it
+ */
 static const char* UIDequeueMessage(void) {
     if (ui_msg_queue.count == 0) return NULL;
     const char* message = ui_msg_queue.messages[ui_msg_queue.tail];
@@ -84,6 +102,9 @@ static const char* UIDequeueMessage(void) {
     return message;
 }
 
+/**
+ * Hides the currently displayed message
+ */
 static void UIHideMessage(void) {
     if (ui_msg_context != NULL) {
         recompui_hide_context(ui_msg_context);
@@ -93,6 +114,9 @@ static void UIHideMessage(void) {
     ui_msg_display_timer = 0;
 }
 
+/**
+ * Displays a message in the corner of the screen
+ */
 static void UIDisplayMessage(const char* message) {
     if (ui_msg_context != NULL) {
         recompui_hide_context(ui_msg_context);
@@ -129,6 +153,9 @@ static void UIDisplayMessage(const char* message) {
     ui_msg_display_timer = UI_MSG_DISPLAY_FRAMES;
 }
 
+/**
+ * Updates the message queue, showing/hiding messages as needed
+ */
 static void UIUpdateMessageQueue(void) {
     if (ui_msg_is_visible) {
         ui_msg_display_timer--;
@@ -143,6 +170,9 @@ static void UIUpdateMessageQueue(void) {
     }
 }
 
+/**
+ * Shows a corner message, queuing it if another message is visible
+ */
 void ShowCornerMessage(const char* message) {
     if (!ui_msg_is_visible) {
         UIDisplayMessage(message);
@@ -151,8 +181,19 @@ void ShowCornerMessage(const char* message) {
     }
 }
 
+
+// ======================================================================== //
+// This code is for receiving messages from lib_main.
+//
+// Recomp only has functions for returning numbers from our library imports,
+// so we need to do fun things to get strings using only 32bit numbers.
+// ======================================================================== //
+
 #define NET_MSG_TEXT_SIZE 128
 
+/**
+ * Retrieves the text portion of the current network message
+ */
 static void RetrieveNetMessageText(char* out_buffer, int max_len) {
     int len = net_msg_get_text_len();
     if (len <= 0 || len >= max_len) {
@@ -174,6 +215,9 @@ static void RetrieveNetMessageText(char* out_buffer, int max_len) {
     out_buffer[pos] = '\0';
 }
 
+/**
+ * Builds a display message from a username and action
+ */
 static void BuildDisplayMessage(char* out, int out_size, const char* username, const char* action) {
     int j = 0;
     int k = 0;
@@ -189,6 +233,12 @@ static void BuildDisplayMessage(char* out, int out_size, const char* username, c
     out[j] = '\0';
 }
 
+/**
+ * Handles a remote jiggy collected message.
+ * In future, major item collection messages will likely
+ * be shown in smaller text on the bottom right,
+ * like when you collect items in OOT/Anchor.
+ */
 static void HandleRemoteJiggyCollected(void) {
     int level_id = net_msg_get_data_int(0);
     int jiggy_id = net_msg_get_data_int(1);
@@ -210,6 +260,9 @@ static void HandleRemoteJiggyCollected(void) {
     }
 }
 
+/**
+ * Processes incoming network messages
+ */
 static void ProcessNetworkMessages(void) {
     for (int i = 0; i < 4; i++) {
         int poll_result = net_msg_poll();
@@ -267,6 +320,11 @@ static void ProcessNetworkMessages(void) {
     }
 }
 
+// ============================================== //
+// The rest of the code here is for networking and
+// game logic, syncing stuff.
+// ============================================== //
+
 static int last_net_status = -999;
 static int is_connected = 0;
 
@@ -298,6 +356,11 @@ static void HandleNetworkStatus(int status) {
 
 static int applying_remote_state = 0;
 
+/**
+ * This function is the main BK loop.
+ * We hook it to check for network packets and 
+ * handle the messagebox queue.
+ */
 RECOMP_HOOK_RETURN("mainLoop") void mainLoop(void) {
     if(!bkrecomp_note_saving_active()) {
         return;
@@ -314,6 +377,9 @@ RECOMP_HOOK_RETURN("mainLoop") void mainLoop(void) {
     }
 }
 
+/**
+ * This hook is called when the player collects a jiggy.
+ */
 RECOMP_HOOK_RETURN("jiggyscore_setCollected") void jiggyscore_setCollected_hook(int level_id, int jiggy_id) {
     if (applying_remote_state) return;
     
@@ -321,6 +387,12 @@ RECOMP_HOOK_RETURN("jiggyscore_setCollected") void jiggyscore_setCollected_hook(
     net_send_jiggy(level_id, jiggy_id);
 }
 
+/**
+ * This hook is called when the player collects a note.
+ * Intention here is to use the recomp note saving functionality
+ * and sync collected notes specifically, hence why note saving has to be turned
+ * on to use this mod.
+ */
 RECOMP_HOOK_RETURN("__baMarker_resolveMusicNoteCollision") void note_collide(Prop *arg0) {
     if (!arg0->is_3d) {
         // Cube *prop_cube = find_cube_for_prop(arg0);
@@ -332,6 +404,10 @@ RECOMP_HOOK_RETURN("__baMarker_resolveMusicNoteCollision") void note_collide(Pro
     }
 }
 
+/**
+ * This hook is called when the mod is initialized, which happens when you click Start Game
+ * and the actual game itself is loaded and run.
+ */
 RECOMP_CALLBACK("*", recomp_on_init) void on_init(void) {
     if(!bkrecomp_note_saving_enabled()) {
         ShowCornerMessage("Network mod disabled. Enable Note Saving in your settings and restart.");

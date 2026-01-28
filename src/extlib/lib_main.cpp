@@ -1,3 +1,11 @@
+// =========================================================================== //
+// Backend code library.
+// This file includes networking and debug logging code that
+// has to be run using host resources.
+// 
+// This library is compiled to a .dll/.so and loaded by our recomp mod.
+// =========================================================================== //
+
 
 #include <iostream>
 #include <vector>
@@ -8,6 +16,8 @@
 #include "debug_log.h"
 #include "lib_packets.hpp"
 #include "lib_recomp.hpp"
+
+// Define our network/socket includes
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -59,6 +69,11 @@ uint32_t GetClockMS() {
     using namespace std::chrono;
     return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
+
+// =========================================================================== //
+// This code is the backend side of the string return stuff.
+// It's used to send string messages to the frontend using only 32-bit numbers.
+// =========================================================================== //
 
 #define MSG_TEXT_SIZE 128
 #define MSG_DATA_SIZE 32
@@ -275,6 +290,14 @@ RECOMP_DLL_FUNC(net_msg_consume) {
     return;
 }
 
+// =================================== //
+// This is the main networking code.
+// =================================== //
+
+/**
+ * Called on game init from the frontend.
+ * Used to setup networking and connect to the configured server.
+ */
 RECOMP_DLL_FUNC(net_init) {
     net_busy = true;
     
@@ -313,6 +336,9 @@ RECOMP_DLL_FUNC(net_init) {
     return;
 }
 
+/**
+ * Sends a raw packet to the server.
+ */
 void SendRawPacket(PacketType type, const void* data, size_t size) {
     if (!VALID_SOCK(udp_socket)) return;
 
@@ -331,11 +357,19 @@ void SendRawPacket(PacketType type, const void* data, size_t size) {
     }
 }
 
+/**
+ * Sends a ping packet to the server.
+ * The server has a no-data-received timeout for disconnecting users,
+ * so this keeps us connected.
+ */
 void SendPing() {
     SendRawPacket(PacketType::Ping, nullptr, 0);
     debug_log("[Net] Ping sent");
 }
 
+/**
+ * Called if required during main loop to connect.
+ */
 bool PerformLazyInit() {
     debug_log("[Net] Setting up UDP Socket...");
 
@@ -362,6 +396,9 @@ bool PerformLazyInit() {
     return true;
 }
 
+/**
+ * Called when we receive a new player connected packet.
+ */
 static void HandlePlayerConnected(const uint8_t* data, int len) {
     try {
         msgpack::object_handle oh = msgpack::unpack((const char*)data, len);
@@ -379,6 +416,9 @@ static void HandlePlayerConnected(const uint8_t* data, int len) {
     }
 }
 
+/**
+ * Called when we receive a player disconnected packet.
+ */
 static void HandlePlayerDisconnected(const uint8_t* data, int len) {
     try {
         msgpack::object_handle oh = msgpack::unpack((const char*)data, len);
@@ -396,6 +436,9 @@ static void HandlePlayerDisconnected(const uint8_t* data, int len) {
     }
 }
 
+/**
+ * Called when we receive a jiggy collected packet.
+ */
 static void HandleJiggyCollected(const uint8_t* data, int len) {
     try {
         msgpack::object_handle oh = msgpack::unpack((const char*)data, len);
@@ -421,10 +464,20 @@ static void HandleJiggyCollected(const uint8_t* data, int len) {
     }
 }
 
+/**
+ * Nothing here currently, but called when we receive
+ * a response to our ping from the server.
+ * 
+ * Could be used to show a disconnect and close our networking (Or auto reconnect)
+ * if we don't receive any packets for a while?
+ */
 static void HandlePong(const uint8_t* data, int len) {
     
 }
 
+/**
+ * Packet receive code, run in the game's main loop.
+ */
 RECOMP_DLL_FUNC(net_update) {
     if (net_busy) { RECOMP_RETURN(int, 4); return; }
 
@@ -516,6 +569,9 @@ RECOMP_DLL_FUNC(net_update) {
     return;
 }
 
+/**
+ * Send a collected jiggy to the server to sync state.
+ */
 RECOMP_DLL_FUNC(net_send_jiggy) {
     int levelId = RECOMP_ARG(int, 0);
     int jiggyId = RECOMP_ARG(int, 1);
@@ -532,10 +588,12 @@ RECOMP_DLL_FUNC(net_send_jiggy) {
     return;
 }
 
-RECOMP_DLL_FUNC(native_lib_test) {
-    RECOMP_RETURN(int, 0);
-}
-
+/**
+ * This was for testing our server is receiving packets.
+ * Use to debug connection issues.
+ * 
+ * Can be called in init after connection from the game side.
+ */
 RECOMP_DLL_FUNC(net_test_udp) {
     debug_log("[Test] Running Raw UDP Test...");
     
@@ -556,6 +614,14 @@ RECOMP_DLL_FUNC(net_test_udp) {
     RECOMP_RETURN(int, 1);
 }
 
+/**
+ * Nothing here yet.
+ * This will send location packets when we add puppets.
+ */
 RECOMP_DLL_FUNC(net_send_pos) {
+    RECOMP_RETURN(int, 0);
+}
+
+RECOMP_DLL_FUNC(native_lib_test) {
     RECOMP_RETURN(int, 0);
 }
