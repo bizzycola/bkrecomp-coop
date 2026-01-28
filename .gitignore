@@ -10,4 +10,13 @@
 ./funcs.h
 patches.map
 build/
+build_pc
 .vscode/settings.json
+RecompModTool.exe
+RecompModTool
+assets_extracted/
+binaries/
+*_pycache_*
+downloads/
+build/
+build2/

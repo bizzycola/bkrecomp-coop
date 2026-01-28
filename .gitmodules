@@ -4,3 +4,11 @@
 [submodule "bk-decomp"]
 	path = bk-decomp
 	url = https://gitlab.com/banjo.decomp/banjo-kazooie
+[submodule "src/extlib/msgpack-c"]
+	path = src/extlib/msgpack-c
+	url = https://github.com/msgpack/msgpack-c
+	branch = cpp_master
+[submodule "src/etxlib/msgpack-c"]
+	path = src/etxlib/msgpack-c
+	url = https://github.com/msgpack/msgpack-c
+	branch = cpp_master

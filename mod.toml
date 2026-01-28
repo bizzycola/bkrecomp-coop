@@ -6,27 +6,23 @@
 # Unique ID of this mod. Pick something long enough that it'll never be the same as any other mod.
 # The name displayed in the mod management menu is separate from this, but this should still be human readable
 # as it will show up in missing dependency errors.
-id = "bk_recomp_mod_template"
+id = "bkrecomp_coop"
 
 # Version of this mod.
 version = "1.0.0"
 
 # The name that will show up for this mod in the mod menu. This should be human readable.
-display_name = "Always Tumble Jump"
+display_name = "Banjo-Kazooie Co-op Mod"
 
 # The description that will show up when this mod is displayed in the mod menu. This should be human readable.
-description =  """
-This is an example mod for Banjo-Kazooie: Recompiled that can be used as a template for creating mods. \
-When this mod is enabled, you will always tumble immediately after jumping.
-
-For more details, see https://github.com/BanjoRecomp/BKRecompModTemplate."""
+description =  "Play Banjo-Kazooie online with your friends."
 
 # A short description that will show up in this mod's entry in the mod list. This should be human readable and kept short
 # to prevent it from being cut off due to the limited space.
-short_description = "Always tumble immediately after jumping."
+short_description = "Play Banjo-Kazooie online with your friends"
 
 # Authors of this mod.
-authors = [ "Your name here" ]
+authors = [ "Bizzycola" ]
 
 # ID of the target recomp game.
 game_id = "bk"
@@ -51,6 +47,23 @@ optional_dependencies = [
 native_libraries = [
 # Example native library:
 #    { name = "my_native_library", funcs = ["my_native_library_function"] }
+    { name = "bkrecomp_coop_extlib", funcs = [
+        "native_lib_test", 
+        "net_init", 
+        "net_send_pos", 
+        "net_update", 
+        "net_test_udp",
+        "net_msg_consume", 
+        # "net_msg_get_chunk", 
+        # "net_msg_get_len", 
+        "net_msg_poll",
+        "net_send_jiggy",
+        "net_msg_get_text_len",
+        "net_msg_get_text_chunk",
+        "net_msg_get_data_len",
+        "net_msg_get_data_chunk",
+        "net_msg_get_data_int"
+    ] }
 ]
 
 # Inputs to the mod tool.
@@ -60,7 +73,7 @@ native_libraries = [
 elf_path = "build/mod.elf"
 
 # Output mod filename.
-mod_filename = "bk_recomp_mod_template"
+mod_filename = "bkrecomp_coop"
 
 # Reference symbol files.
 func_reference_syms_file = "BanjoRecompSyms/bk.us.rev0.syms.toml"
@@ -95,3 +108,43 @@ name = "String Option"
 description = "Test string config option."
 type = "String"
 default = "Lorem Ipsum"
+
+# Server URL
+[[manifest.config_options]]
+id = "server_url"
+name = "Server URL"
+description = "The URL of the server to connect to."
+type = "String"
+default = "localhost"
+
+# Server Port
+[[manifest.config_options]]
+id = "server_port"
+name = "Server Port"
+description = "The port of the server to connect to."
+type = "String"
+default = "8756"
+
+# username
+[[manifest.config_options]]
+id = "username"
+name = "Username"
+description = "The username to use in the lobby."
+type = "String"
+default = "Player"
+
+# Lobby name
+[[manifest.config_options]]
+id = "lobby_name"
+name = "Lobby Name"
+description = "The name of the lobby to join or create."
+type = "String"
+default = ""
+
+# Lobby password
+[[manifest.config_options]]
+id = "lobby_password"
+name = "Lobby Password"
+description = "The password of the lobby to join or create."
+type = "String"
+default = ""
