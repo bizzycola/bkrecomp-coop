@@ -9,6 +9,9 @@ extern void jiggyscore_setCollected(int levelid, int jiggy_id);
 extern int jiggyscore_isCollected(int levelid, int jiggy_id);
 extern void item_adjustByDiffWithoutHud(int item, int diff);
 
+//extern s32 bkrecomp_note_saving_active();
+//extern s32 bkrecomp_note_saving_enabled();
+
 RECOMP_IMPORT(".", int net_init(const char* host, const char* username, const char* lobby_name, const char* password));
 RECOMP_IMPORT(".", int net_update(void));
 RECOMP_IMPORT(".", int net_test_udp(void));
@@ -21,8 +24,9 @@ RECOMP_IMPORT(".", int net_msg_get_data_chunk(int offset));
 RECOMP_IMPORT(".", int net_msg_get_data_int(int index));
 RECOMP_IMPORT(".", int net_msg_consume(void));
 
-RECOMP_IMPORT(".", s32 bkrecomp_note_saving_active());
-RECOMP_IMPORT(".", s32 bkrecomp_note_saving_enabled());
+RECOMP_IMPORT("*", s32 bkrecomp_note_saving_active());
+RECOMP_IMPORT("*", s32 bkrecomp_note_saving_enabled());
+
 
 // sync funcs
 RECOMP_IMPORT(".", int net_send_jiggy(int level_id, int jiggy_id));
