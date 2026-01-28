@@ -464,6 +464,26 @@ static void HandleJiggyCollected(const uint8_t* data, int len) {
     }
 }
 
+static void HandleNoteCollect(const uint8_t* data, int len) {
+    try {
+        msgpack::object_handle oh = msgpack::unpack((const char*)data, len);
+        msgpack::object obj = oh.get();
+
+        if(obj.type == msgpack::type::ARRAY && obj.via.array.size >= 4) {
+            int mapId = obj.via.array.ptr[0].as<int>();
+            int levelId = obj.via.array.ptr[1].as<int>();
+            bool isDynamic = obj.via.array.ptr[2].as<bool>();
+            int noteIndex = obj.via.array.ptr[3].as<int>();
+
+            int32_t payload[4] = { mapId, levelId, isDynamic ? 1 : 0, noteIndex };
+
+            QueueDataMessage(MSGTYPE_NOTE_COLLECTED, payload, sizeof(payload));
+        }
+    } catch(const std::exception& e) {
+        debug_log("[Net] Failed to parse JiggyCollected: " + std::string(e.what()));
+    }
+}
+
 /**
  * Nothing here currently, but called when we receive
  * a response to our ping from the server.
@@ -550,6 +570,10 @@ RECOMP_DLL_FUNC(net_update) {
                 case static_cast<uint8_t>(PacketType::Pong):
                     HandlePong(payload, payload_len);
                     break;
+
+                case static_cast<uint8_t>(PacketType::NoteCollected):
+                    HandleNoteCollect(payload, payload_len);
+                    break;
                     
                 default:
                     debug_log("[Net] Unknown packet type: " + std::to_string(type));
@@ -585,7 +609,28 @@ RECOMP_DLL_FUNC(net_send_jiggy) {
         
     SendRawPacket(PacketType::JiggyCollected, sbuf.data(), sbuf.size());
     RECOMP_RETURN(int, 1);
-    return;
+}
+
+/**
+ * Send a collected note to the server to sync state.
+ */
+RECOMP_DLL_FUNC(net_send_note) {
+    int map = RECOMP_ARG(int, 0);
+    int level = RECOMP_ARG(int, 1);
+    int isDynamic = RECOMP_ARG(int, 2);
+    int noteIndex = RECOMP_ARG(int, 3);
+
+    NotePacket pak;
+    pak.MapId = map;
+    pak.LevelId = level;
+    pak.IsDynamic = isDynamic != 0;
+    pak.NoteIndex = noteIndex;
+    
+    msgpack::sbuffer sbuf;
+    msgpack::pack(sbuf, pak);
+        
+    SendRawPacket(PacketType::NoteCollected, sbuf.data(), sbuf.size());
+    RECOMP_RETURN(int, 1);
 }
 
 /**

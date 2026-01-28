@@ -15,9 +15,10 @@ enum class PacketType : uint8_t {
     PlayerDisconnected = 4,
     Ping = 5,
     Pong = 6,
-    PlayerPosition = 50,
-    JiggyCollected = 20,
     FullSyncRequest = 10,
+    PlayerPosition = 50,
+    JiggyCollected = 51,
+    NoteCollected = 52,
 };
 
 struct JiggyPacket {
@@ -25,6 +26,15 @@ struct JiggyPacket {
     int JiggyId;
 
     MSGPACK_DEFINE(LevelId, JiggyId); 
+};
+
+struct NotePacket {
+    int MapId;
+    int LevelId;
+    bool IsDynamic;
+    int NoteIndex;
+
+    MSGPACK_DEFINE(MapId, LevelId, IsDynamic, NoteIndex);
 };
 
 struct LoginPacket {

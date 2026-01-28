@@ -11,6 +11,9 @@
 #include "recomputils.h"
 #include "recompconfig.h"
 #include "recompui.h"
+#include "notes/note_saving.h"
+#include "notes/demo_playback_functions.h"
+#include "utils/corner_message.h"
 
 extern void jiggyscore_setCollected(int levelid, int jiggy_id);
 extern int jiggyscore_isCollected(int levelid, int jiggy_id);
@@ -33,10 +36,13 @@ RECOMP_IMPORT(".", int net_msg_consume(void));
 // Recomp imports
 RECOMP_IMPORT("*", s32 bkrecomp_note_saving_active());
 RECOMP_IMPORT("*", s32 bkrecomp_note_saving_enabled());
+// RECOMP_IMPORT("*", s32 recomp_in_demo_playback_game_mode());
+RECOMP_IMPORT("*", void *bkrecomp_get_extended_prop_data(Cube* cube, Prop* prop, PropExtensionId extension_id));
 
 
 // Sync-related functions from lib_main
 RECOMP_IMPORT(".", int net_send_jiggy(int level_id, int jiggy_id));
+RECOMP_IMPORT(".", int net_send_note(int mapId, int levelId, int isDynamic, int noteIndex));
 
 // most of these are defined by lib_packets now and can probably
 // be removed
@@ -51,135 +57,10 @@ RECOMP_IMPORT(".", int net_send_jiggy(int level_id, int jiggy_id));
 #define MSGTYPE_MUMBO_TOKEN_COLLECTED 13
 #define MSGTYPE_JINJO_COLLECTED     14
 
-// Some consts for the message queue
-// which queues messages shown so they don't overlap
-// or replace eachother
-#define UI_MSG_QUEUE_SIZE 16
-#define UI_MSG_MAX_LENGTH 128
-#define UI_MSG_DISPLAY_FRAMES 180
+extern enum map_e map_get(void);
+extern s32 level_get(void);
 
 
-typedef struct {
-    char messages[UI_MSG_QUEUE_SIZE][UI_MSG_MAX_LENGTH];
-    int head;
-    int tail;
-    int count;
-} UIMessageQueue;
-
-static UIMessageQueue ui_msg_queue = { .head = 0, .tail = 0, .count = 0 };
-static RecompuiContext ui_msg_context = NULL;
-static int ui_msg_display_timer = 0;
-static int ui_msg_is_visible = 0;
-
-/**
- * Queue a message to be shown onscreen
- */
-static void UIQueueMessage(const char* message) {
-    if (ui_msg_queue.count >= UI_MSG_QUEUE_SIZE) {
-        ui_msg_queue.tail = (ui_msg_queue.tail + 1) % UI_MSG_QUEUE_SIZE;
-        ui_msg_queue.count--;
-    }
-
-    int i = 0;
-    while (message[i] != '\0' && i < UI_MSG_MAX_LENGTH - 1) {
-        ui_msg_queue.messages[ui_msg_queue.head][i] = message[i];
-        i++;
-    }
-    ui_msg_queue.messages[ui_msg_queue.head][i] = '\0';
-
-    ui_msg_queue.head = (ui_msg_queue.head + 1) % UI_MSG_QUEUE_SIZE;
-    ui_msg_queue.count++;
-}
-
-/**
- * Dequeues a message from the queue and returns it
- */
-static const char* UIDequeueMessage(void) {
-    if (ui_msg_queue.count == 0) return NULL;
-    const char* message = ui_msg_queue.messages[ui_msg_queue.tail];
-    ui_msg_queue.tail = (ui_msg_queue.tail + 1) % UI_MSG_QUEUE_SIZE;
-    ui_msg_queue.count--;
-    return message;
-}
-
-/**
- * Hides the currently displayed message
- */
-static void UIHideMessage(void) {
-    if (ui_msg_context != NULL) {
-        recompui_hide_context(ui_msg_context);
-        ui_msg_context = NULL;
-    }
-    ui_msg_is_visible = 0;
-    ui_msg_display_timer = 0;
-}
-
-/**
- * Displays a message in the corner of the screen
- */
-static void UIDisplayMessage(const char* message) {
-    if (ui_msg_context != NULL) {
-        recompui_hide_context(ui_msg_context);
-    }
-
-    ui_msg_context = recompui_create_context();
-    recompui_set_context_captures_input(ui_msg_context, 0);
-    recompui_set_context_captures_mouse(ui_msg_context, 0);
-    recompui_open_context(ui_msg_context);
-
-    RecompuiResource root = recompui_context_root(ui_msg_context);
-    recompui_set_position(root, POSITION_ABSOLUTE);
-    recompui_set_top(root, 32.0f, UNIT_DP);
-    recompui_set_right(root, 32.0f, UNIT_DP);
-    recompui_set_width_auto(root);
-    recompui_set_height_auto(root);
-
-    RecompuiColor bg_color = { .r = 10, .g = 10, .b = 10, .a = 230 };
-    RecompuiColor text_color = { .r = 255, .g = 255, .b = 255, .a = 255 };
-
-    RecompuiResource container = recompui_create_element(ui_msg_context, root);
-    recompui_set_background_color(container, &bg_color);
-    recompui_set_padding(container, 12.0f, UNIT_DP);
-    recompui_set_border_radius(container, 8.0f, UNIT_DP);
-    recompui_set_border_width(container, 1.0f, UNIT_DP);
-    recompui_set_border_color(container, &text_color);
-
-    recompui_create_label(ui_msg_context, container, message, LABELSTYLE_NORMAL);
-
-    recompui_close_context(ui_msg_context);
-    recompui_show_context(ui_msg_context);
-
-    ui_msg_is_visible = 1;
-    ui_msg_display_timer = UI_MSG_DISPLAY_FRAMES;
-}
-
-/**
- * Updates the message queue, showing/hiding messages as needed
- */
-static void UIUpdateMessageQueue(void) {
-    if (ui_msg_is_visible) {
-        ui_msg_display_timer--;
-        if (ui_msg_display_timer <= 0) {
-            UIHideMessage();
-            const char* next = UIDequeueMessage();
-            if (next != NULL) UIDisplayMessage(next);
-        }
-    } else {
-        const char* next = UIDequeueMessage();
-        if (next != NULL) UIDisplayMessage(next);
-    }
-}
-
-/**
- * Shows a corner message, queuing it if another message is visible
- */
-void ShowCornerMessage(const char* message) {
-    if (!ui_msg_is_visible) {
-        UIDisplayMessage(message);
-    } else {
-        UIQueueMessage(message);
-    }
-}
 
 
 // ======================================================================== //
@@ -260,6 +141,25 @@ static void HandleRemoteJiggyCollected(void) {
     }
 }
 
+static void HandleRemoteNoteCollected(void) {
+    int map_id = net_msg_get_data_int(0);
+    int level_id = net_msg_get_data_int(1);
+    int is_dynamic = net_msg_get_data_int(2);
+    int note_index = net_msg_get_data_int(3);
+
+    if(!is_note_collected(map_id, level_id, note_index)) {
+        if(is_dynamic) {
+            ShowCornerMessage("A player collected a dynamic note");
+            collect_dynamic_note(map_id, level_id);
+        } else {
+            ShowCornerMessage("A player collected a note");
+            set_note_collected(map_id, level_id, note_index);
+        }
+
+        item_adjustByDiffWithoutHud(ITEM_C_NOTE, 1);
+    }
+}
+
 /**
  * Processes incoming network messages
  */
@@ -299,7 +199,7 @@ static void ProcessNetworkMessages(void) {
             }
             
             case MSGTYPE_NOTE_COLLECTED: {
-
+                HandleRemoteNoteCollected();
                 break;
             }
             
@@ -314,6 +214,7 @@ static void ProcessNetworkMessages(void) {
                 ShowCornerMessage(info);
                 break;
             }
+
         }
 
         net_msg_consume();
@@ -393,14 +294,31 @@ RECOMP_HOOK_RETURN("jiggyscore_setCollected") void jiggyscore_setCollected_hook(
  * and sync collected notes specifically, hence why note saving has to be turned
  * on to use this mod.
  */
-RECOMP_HOOK_RETURN("__baMarker_resolveMusicNoteCollision") void note_collide(Prop *arg0) {
-    if (!arg0->is_3d) {
-        // Cube *prop_cube = find_cube_for_prop(arg0);
-        // if (prop_cube != NULL) {
-        //     // NoteSavingExtensionData* note_data = (NoteSavingExtensionData*)bkrecomp_get_extended_prop_data(prop_cube, arg0, note_saving_prop_extension_id);
-        //     // set_note_collected(map_get(), level_get(), note_data->note_index);
-        //     ShowCornerMessage("Note collected");
-        // }
+RECOMP_HOOK("__baMarker_resolveMusicNoteCollision") void note_collide(Prop *arg0) {
+    // null check arg
+    if (arg0 == NULL) {
+        recomp_printf("Music collision arg is null\n");
+        return;
+    }
+
+   if (!recomp_in_demo_playback_game_mode()) {
+        if (arg0->is_actor) {
+            collect_dynamic_note(map_get(), level_get());
+            net_send_note(map_get(), level_get(), 1, 0);
+            ShowCornerMessage("Dynamic Note collected!");
+        }
+        else if (!arg0->is_3d) {
+            Cube *prop_cube = find_cube_for_prop(arg0);
+            if (prop_cube != NULL) {
+                NoteSavingExtensionData *note_data = (NoteSavingExtensionData *)bkrecomp_get_extended_prop_data(prop_cube, arg0, get_note_saving_prop_extension_id());
+                // set_note_collected(map_get(), level_get(), note_data->note_index);
+                net_send_note(map_get(), level_get(), 0, note_data->note_index);
+
+                // print note ID
+                recomp_printf("Collected note index: %d\n", note_data->note_index);
+            }
+            ShowCornerMessage("Note collected!");
+        }
     }
 }
 
@@ -413,6 +331,9 @@ RECOMP_CALLBACK("*", recomp_on_init) void on_init(void) {
         ShowCornerMessage("Network mod disabled. Enable Note Saving in your settings and restart.");
         return;
     }
+
+    init_note_saving();
+    calculate_map_start_note_indices();
 
     char* host = recomp_get_config_string("server_url");
     char* username = recomp_get_config_string("username");
@@ -441,5 +362,8 @@ RECOMP_CALLBACK("*", recomp_on_init) void on_init(void) {
 
     if (res != 1) {
         recomp_printf("Network init failed.\n");
+    } else {
+        recomp_printf("Network init succeeded.\n");
     }
 }
+

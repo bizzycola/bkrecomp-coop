@@ -62,7 +62,8 @@ native_libraries = [
         "net_msg_get_text_chunk",
         "net_msg_get_data_len",
         "net_msg_get_data_chunk",
-        "net_msg_get_data_int"
+        "net_msg_get_data_int",
+        "net_send_note"
     ] }
 ]
 
