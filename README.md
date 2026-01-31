@@ -3,9 +3,20 @@
 This is the recomp mod code for the Banjo-Kazooie Recomp co-op mod.
 It's based both on the BK mod template, and also the [LT-Schmiddy MM Recomp Mod Template](https://github.com/LT-Schmiddy/SchmiddysMMRecompModTemplate) from which I borrowed all the python build tools.
 
+## Status
+At the moment, the mod has a functioning server with lobbies, and it syncs collected jiggies.
+
+Puppets are work in progress, I have sidelined a working implementation of note syncing but it requires hacking the recomp note saving code (and by hacking I mean completely replacing it and forcing players to disable the original one in the settings). I can ship with this, but I'm hopeful we can just update recomp to export all the required events and functions for me to just hook directly into it instead of replacing it which is less than ideal.
+
+## Server
+The Rust server for the mod is also included in this repo under the `server/` directory.
+
+Refer to the readme there for information on building and running it.
+
+## Building the mod
 The following build sections are like-for-like from the MM mod template.
 
-## Tools
+### Tools
 
 This template has somewhat different requirements from the default mod template. In order to run it, you'll need the following:
 
@@ -26,7 +37,7 @@ for your platform, which contains the `RecompModTool` and the MIPS-only LLVM 21 
 It will also download Zig 0.14 for project configurations that require it. This is done because Zig's packaging is inconsistent across ecosystems, but the compiler
 itself is thankfully small.
 
-## Building
+### Building
 
 TL;DR: Run `git submodule update --init --recursive` to make sure you've clones all submodules. Then, run `./modbuild.py` to prepare a debug build.
 Run `./modbuild.py thunderstore` to create a Thunderstore package.
@@ -43,7 +54,3 @@ All commands are defined in `tasks.py`, in accordance to the `pyinvoke` library.
 
 (Don't worry, there are no Python packages you need to install. All of the required Python code has been incorperated into this template).
 
-## Server
-The Rust server for the mod is also included in this repo under the `server/` directory.
-
-Refer to the readme there for information on building and running it.
