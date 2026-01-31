@@ -42,3 +42,8 @@ All commands are defined in `tasks.py`, in accordance to the `pyinvoke` library.
 [https://docs.pyinvoke.org/en/stable/](https://docs.pyinvoke.org/en/stable/) for info on how to define additional commands.
 
 (Don't worry, there are no Python packages you need to install. All of the required Python code has been incorperated into this template).
+
+## Server
+The Rust server for the mod is also included in this repo under the `server/` directory.
+
+Refer to the readme there for information on building and running it.

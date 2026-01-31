@@ -1,9 +1,12 @@
 #include "recomputils.h"
 #include "sync.h"
-#include "../message_queue/coop_messages.h"
+#include "../message_queue/message_queue.h"
 
 // tolerance is for matching positions within this range
 #define POS_TOLERANCE 10
+
+// local sync state
+CollectionState g_collection_state = {0};
 
 extern struct
 {
@@ -84,4 +87,3 @@ int sync_is_jiggy_collected(s16 level_id, s16 jiggy_id)
     }
     return 0;
 }
-

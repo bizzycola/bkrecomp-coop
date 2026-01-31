@@ -32,14 +32,14 @@ typedef struct
     unsigned char data[MAX_MESSAGE_DATA_SIZE];
 } GameMessage;
 
-int coop_poll_message(GameMessage *out_message);
+int poll_queue_message(GameMessage *out_message);
 
-static inline const char *coop_message_get_string(const GameMessage *msg)
+static inline const char *message_queue_get_string(const GameMessage *msg)
 {
     return (const char *)msg->data;
 }
 
-static inline void coop_message_get_rotation(const GameMessage *msg, float *yaw, float *pitch, float *roll)
+static inline void message_queue_get_rotation(const GameMessage *msg, float *yaw, float *pitch, float *roll)
 {
     const float *rotData = (const float *)msg->data;
     if (yaw)
@@ -50,6 +50,6 @@ static inline void coop_message_get_rotation(const GameMessage *msg, float *yaw,
         *roll = rotData[2];
 }
 
-void coop_process_message(const GameMessage *msg);
+void process_queue_message(const GameMessage *msg);
 
 #endif

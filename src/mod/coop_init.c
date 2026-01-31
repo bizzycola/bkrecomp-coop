@@ -14,7 +14,7 @@
 #include "recompui.h"
 #include "recompdata.h"
 #include "puppets/puppet.h"
-#include "message_queue/coop_messages.h"
+#include "message_queue/message_queue.h"
 #include "toast/toast.h"
 #include "sync/sync.h"
 
@@ -34,9 +34,9 @@ void mainLoop(void)
     int messagesProcessed = 0;
     const int MAX_MESSAGES_PER_FRAME = 100;
 
-    while (messagesProcessed < MAX_MESSAGES_PER_FRAME && coop_poll_message(&msg))
+    while (messagesProcessed < MAX_MESSAGES_PER_FRAME && poll_queue_message(&msg))
     {
-        coop_process_message(&msg);
+        process_queue_message(&msg);
         messagesProcessed++;
     }
 }

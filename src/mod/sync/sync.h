@@ -2,6 +2,12 @@
 #include "functions.h"
 #include "variables.h"
 
+#define MAX_COLLECTED_NOTES 900
+#define MAX_COLLECTED_JIGGIES 90
+#define MAX_COLLECTED_HONEYCOMBS 24
+#define MAX_COLLECTED_TOKENS 116
+#define MAX_COLLECTED_JINJOS 45
+
 typedef struct
 {
     s16 map_id;

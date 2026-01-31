@@ -1,4 +1,4 @@
-#include "coop_messages.h"
+#include "message_queue.h"
 #include "modding.h"
 #include "functions.h"
 #include "variables.h"
@@ -7,7 +7,7 @@
 
 RECOMP_IMPORT(".", int native_poll_message(void *buffer));
 
-int coop_poll_message(GameMessage *out_message)
+int poll_queue_message(GameMessage *out_message)
 {
     if (!out_message)
     {
@@ -18,7 +18,7 @@ int coop_poll_message(GameMessage *out_message)
 }
 
 // Process a message based on its type
-void coop_process_message(const GameMessage *msg)
+void process_queue_message(const GameMessage *msg)
 {
     if (!msg)
     {
@@ -29,7 +29,7 @@ void coop_process_message(const GameMessage *msg)
     {
     case MSG_PLAYER_CONNECTED:
     {
-        const char *username = coop_message_get_string(msg);
+        const char *username = message_queue_get_string(msg);
         toast_success(username);
         break;
     }
@@ -66,7 +66,7 @@ void coop_process_message(const GameMessage *msg)
         short levelId = (short)msg->param2;
 
         float yaw, pitch, roll;
-        coop_message_get_rotation(msg, &yaw, &pitch, &roll);
+        message_queue_get_rotation(msg, &yaw, &pitch, &roll);
 
         break;
     }
@@ -85,14 +85,14 @@ void coop_process_message(const GameMessage *msg)
 
     case MSG_CONNECTION_STATUS:
     {
-        const char *status = coop_message_get_string(msg);
+        const char *status = message_queue_get_string(msg);
         toast_info(status);
         break;
     }
 
     case MSG_CONNECTION_ERROR:
     {
-        const char *error = coop_message_get_string(msg);
+        const char *error = message_queue_get_string(msg);
         toast_error(error);
         break;
     }
