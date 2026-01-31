@@ -22,3 +22,5 @@ build/
 build2/
 TEMP/
 server/target/
+server/lobbies/
+test_env/

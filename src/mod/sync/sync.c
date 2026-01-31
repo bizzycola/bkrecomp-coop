@@ -53,34 +53,31 @@ int positions_match(s16 x1, s16 y1, s16 z1, s16 x2, s16 y2, s16 z2)
     return (dx <= POS_TOLERANCE && dy <= POS_TOLERANCE && dz <= POS_TOLERANCE);
 }
 
-void sync_add_jiggy(int level_id, int jiggy_id)
+void sync_add_jiggy(int jiggy_enum_id, int collected_value)
 {
     // don't track if we already have this jiggy
     for (int i = 0; i < g_collection_state.jiggy_count; i++)
     {
         JiggyIdentifier *jiggy = &g_collection_state.collected_jiggies[i];
-        if (jiggy->level_id == level_id && jiggy->jiggy_id == jiggy_id)
+        if (jiggy->level_id == jiggy_enum_id && jiggy->jiggy_id == collected_value)
         {
             return;
         }
     }
 
     JiggyIdentifier *jiggy = &g_collection_state.collected_jiggies[g_collection_state.jiggy_count];
-    jiggy->level_id = level_id;
-    jiggy->jiggy_id = jiggy_id;
+    jiggy->level_id = jiggy_enum_id;
+    jiggy->jiggy_id = collected_value;
 
     g_collection_state.jiggy_count++;
-
-    recomp_printf("got jiggy level=%d id=%d total=%d\n",
-                  level_id, jiggy_id, g_collection_state.jiggy_count);
 }
 
-int sync_is_jiggy_collected(s16 level_id, s16 jiggy_id)
+int sync_is_jiggy_collected(s16 jiggy_enum_id, s16 collected_value)
 {
     for (int i = 0; i < g_collection_state.jiggy_count; i++)
     {
         JiggyIdentifier *jiggy = &g_collection_state.collected_jiggies[i];
-        if (jiggy->level_id == level_id && jiggy->jiggy_id == jiggy_id)
+        if (jiggy->level_id == jiggy_enum_id && jiggy->jiggy_id == collected_value)
         {
             return 1;
         }

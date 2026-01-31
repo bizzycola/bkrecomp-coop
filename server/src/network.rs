@@ -196,18 +196,13 @@ impl NetworkServer {
         let lobby_arc = lobby.unwrap();
         let added = {
             let mut lob = lobby_arc.write().await;
-            lob.add_collected_jiggy(jiggy.level_id, jiggy.jiggy_id, username.clone())
+            lob.add_collected_jiggy(jiggy.jiggy_enum_id, jiggy.collected_value, username.clone())
         };
 
         if added {
-            debug!(
-                "Jiggy collected: Level={}, Jiggy={} by {} in lobby {}",
-                jiggy.level_id, jiggy.jiggy_id, username, lobby_name
-            );
-
             let broadcast = BroadcastJiggy {
-                level_id: jiggy.level_id,
-                jiggy_id: jiggy.jiggy_id,
+                jiggy_enum_id: jiggy.jiggy_enum_id,
+                collected_value: jiggy.collected_value,
                 collector: username,
             };
 
@@ -501,8 +496,8 @@ impl NetworkServer {
 
         for jiggy in &l.collected_jiggies {
             let broadcast = BroadcastJiggy {
-                level_id: jiggy.level_id,
-                jiggy_id: jiggy.jiggy_id,
+                jiggy_enum_id: jiggy.level_id,
+                collected_value: jiggy.jiggy_id,
                 collector: jiggy.collected_by.clone(),
             };
             self.send_packet_serialized(PacketType::JiggyCollected, &broadcast, addr)

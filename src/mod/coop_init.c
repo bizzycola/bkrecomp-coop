@@ -17,11 +17,13 @@
 #include "message_queue/message_queue.h"
 #include "toast/toast.h"
 #include "sync/sync.h"
+#include "collection/collection.h"
 
 RECOMP_IMPORT(".", int native_lib_test(int param1, float param2, const char *param3));
 RECOMP_IMPORT(".", int native_connect_to_server(const char *host, const char *username, const char *lobby, const char *password));
 RECOMP_IMPORT(".", int native_update_network(void));
 RECOMP_IMPORT(".", int native_disconnect_from_server(void));
+RECOMP_IMPORT(".", int native_sync_jiggy(int jiggyEnumId, int collectedValue));
 
 RECOMP_HOOK_RETURN("mainLoop")
 void mainLoop(void)
@@ -67,7 +69,13 @@ void on_init(void)
 }
 
 RECOMP_HOOK_RETURN("jiggyscore_setCollected")
-void jiggyscore_setCollected_hook(int level_id, int jiggy_id)
+void jiggyscore_setCollected_hook(int jiggy_enum_id, int collected_value)
 {
-    sync_add_jiggy(level_id, jiggy_id);
+    if(applying_remote_state())
+    {
+        return;
+    }
+
+    sync_add_jiggy(jiggy_enum_id, collected_value);
+    native_sync_jiggy(jiggy_enum_id, collected_value);
 }

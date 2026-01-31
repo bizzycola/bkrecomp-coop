@@ -73,7 +73,7 @@ public:
     void Update();
     bool HasEvents();
     NetEvent PopEvent();
-    void SendJiggy(int levelId, int jiggyId);
+    void SendJiggy(int jiggyEnumId, int collectedValue);
     void SendNote(int mapId, int levelId, bool isDynamic, int noteIndex);
     void SendNotePos(int mapId, int x, int y, int z);
     void SendNoteSaveData(int levelIndex, const std::vector<uint8_t>& saveData);

@@ -91,11 +91,62 @@ RECOMP_DLL_FUNC(native_connect_to_server)
     RECOMP_RETURN(int, 1);
 }
 
+static uint8_t PacketTypeToMessageType(PacketType packetType)
+{
+    switch (packetType)
+    {
+    case PacketType::PlayerConnected:
+        return (uint8_t)MessageType::PLAYER_CONNECTED;
+    case PacketType::PlayerDisconnected:
+        return (uint8_t)MessageType::PLAYER_DISCONNECTED;
+    case PacketType::JiggyCollected:
+        return (uint8_t)MessageType::JIGGY_COLLECTED;
+    case PacketType::NoteCollected:
+        return (uint8_t)MessageType::NOTE_COLLECTED;
+    case PacketType::PuppetUpdate:
+        return (uint8_t)MessageType::PUPPET_UPDATE;
+    case PacketType::LevelOpened:
+        return (uint8_t)MessageType::LEVEL_OPENED;
+    case PacketType::NoteSaveData:
+        return (uint8_t)MessageType::NOTE_SAVE_DATA;
+    default:
+        return 0;
+    }
+}
+
 RECOMP_DLL_FUNC(native_update_network)
 {
     if (g_networkClient != nullptr)
     {
         g_networkClient->Update();
+
+        while (g_networkClient->HasEvents())
+        {
+            NetEvent evt = g_networkClient->PopEvent();
+
+            GameMessage msg;
+            msg.type = PacketTypeToMessageType(evt.type);
+            msg.playerId = evt.playerId;
+
+            if (!evt.textData.empty())
+            {
+                size_t copySize = std::min(evt.textData.size(), MAX_MESSAGE_DATA_SIZE - 1);
+                memcpy(msg.data, evt.textData.c_str(), copySize);
+                msg.data[copySize] = '\0';
+                msg.dataSize = (uint16_t)(copySize + 1);
+            }
+
+            if (evt.intData.size() > 0)
+                msg.param1 = evt.intData[0];
+            if (evt.intData.size() > 1)
+                msg.param2 = evt.intData[1];
+            if (evt.intData.size() > 2)
+                msg.param3 = evt.intData[2];
+            if (evt.intData.size() > 3)
+                msg.param4 = evt.intData[3];
+
+            g_messageQueue.Push(msg);
+        }
     }
 
     RECOMP_RETURN(int, 0);
@@ -103,35 +154,27 @@ RECOMP_DLL_FUNC(native_update_network)
 
 RECOMP_DLL_FUNC(native_disconnect_from_server)
 {
-    debug_log("[lib_main] native_disconnect_from_server called");
-
     if (g_networkClient != nullptr)
     {
-        debug_log("[lib_main] Deleting NetworkClient");
         delete g_networkClient;
         g_networkClient = nullptr;
 
         GameMessage disconnectedMsg = CreateConnectionStatusMsg("Disconnected from server");
         g_messageQueue.Push(disconnectedMsg);
-        debug_log("[lib_main] Pushed 'Disconnected' message to queue");
-    }
-    else
-    {
-        debug_log("[lib_main] NetworkClient was already null");
     }
 
     RECOMP_RETURN(int, 1);
 }
 
-void EnqueueExampleMessages()
+RECOMP_DLL_FUNC(native_sync_jiggy)
 {
-    GameMessage playerConnected = CreatePlayerConnectedMsg(42, "TestPlayer");
-    g_messageQueue.Push(playerConnected);
+    int jiggyEnumId = RECOMP_ARG(int, 0);
+    int collectedValue = RECOMP_ARG(int, 1);
 
-    GameMessage jiggyMsg = CreateJiggyCollectedMsg(42, 1, 5);
-    g_messageQueue.Push(jiggyMsg);
+    if (g_networkClient != nullptr)
+    {
+        g_networkClient->SendJiggy(jiggyEnumId, collectedValue);
+    }
 
-    GameMessage puppetMsg = CreatePuppetUpdateMsg(42, 100.0f, 200.0f, 300.0f,
-                                                  0.0f, 0.0f, 0.0f, 1, 1);
-    g_messageQueue.Push(puppetMsg);
+    RECOMP_RETURN(int, 1);
 }

@@ -4,6 +4,8 @@
 #include "variables.h"
 #include "../toast/toast.h"
 #include "recomputils.h"
+#include "../sync/sync.h"
+#include "../collection/collection.h"
 
 RECOMP_IMPORT(".", int native_poll_message(void *buffer));
 
@@ -42,8 +44,17 @@ void process_queue_message(const GameMessage *msg)
 
     case MSG_JIGGY_COLLECTED:
     {
-        int levelId = msg->param1;
-        int jiggyId = msg->param2;
+        int jiggyEnumId = msg->param1;
+        int collectedValue = msg->param2;
+
+        toast_info("Jiggy collected");
+
+        if (!sync_is_jiggy_collected(jiggyEnumId, collectedValue))
+        {
+            sync_add_jiggy(jiggyEnumId, collectedValue);
+            collect_jiggy(jiggyEnumId, collectedValue);
+        }
+
         break;
     }
 

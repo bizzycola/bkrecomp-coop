@@ -52,5 +52,5 @@ typedef struct
 void sync_init(void);
 void sync_clear(void);
 
-void sync_add_jiggy(int level_id, int jiggy_id);
-int sync_is_jiggy_collected(s16 level_id, s16 jiggy_id);
+void sync_add_jiggy(int jiggy_enum_id, int collected_value);
+int sync_is_jiggy_collected(s16 jiggy_enum_id, s16 collected_value);

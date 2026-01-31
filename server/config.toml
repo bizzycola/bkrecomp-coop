@@ -15,7 +15,7 @@ client_timeout_seconds = 60
 lobby_idle_timeout_seconds = 300
 
 # whether to save lobbies as JSON files to disk
-enable_persistence = true
+enable_persistence = false
 
 # where to save persisted lobby JSON files
 persistence_dir = "./lobbies"

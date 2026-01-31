@@ -250,27 +250,27 @@ impl Lobby {
         true
     }
 
-    pub fn is_jiggy_collected(&self, level_id: i32, jiggy_id: i32) -> bool {
+    pub fn is_jiggy_collected(&self, jiggy_enum_id: i32, collected_value: i32) -> bool {
         self.collected_jiggies
             .iter()
-            .any(|j| j.level_id == level_id && j.jiggy_id == jiggy_id)
+            .any(|j| j.level_id == jiggy_enum_id && j.jiggy_id == collected_value)
     }
 
     pub fn add_collected_jiggy(
         &mut self,
-        level_id: i32,
-        jiggy_id: i32,
-        collected_by: String
+        jiggy_enum_id: i32,
+        collected_value: i32,
+        collected_by: String,
     ) -> bool {
-        if self.is_jiggy_collected(level_id, jiggy_id) {
+        if self.is_jiggy_collected(jiggy_enum_id, collected_value) {
             return false;
         }
 
         self.collected_jiggies.push(CollectedJiggy {
-            level_id,
-            jiggy_id,
+            level_id: jiggy_enum_id,
+            jiggy_id: collected_value,
             collected_by,
-            timestamp: chrono::Utc::now().timestamp()
+            timestamp: chrono::Utc::now().timestamp(),
         });
 
         self.update_activity();
@@ -278,9 +278,7 @@ impl Lobby {
     }
 
     pub fn is_level_opened(&self, world_id: i32) -> bool {
-        self.opened_levels
-            .iter()
-            .any(|l| l.world_id == world_id)
+        self.opened_levels.iter().any(|l| l.world_id == world_id)
     }
 
     pub fn add_opened_level(&mut self, world_id: i32, jiggy_cost: i32) -> bool {
@@ -292,7 +290,7 @@ impl Lobby {
             world_id,
             jiggy_cost,
             opened_by: String::from("JiggyWiggy"), // todo: add user to packet
-            timestamp: chrono::Utc::now().timestamp()
+            timestamp: chrono::Utc::now().timestamp(),
         });
 
         self.update_activity();
@@ -337,7 +335,7 @@ impl Lobby {
 
                 changed
             }
-            _ => false
+            _ => false,
         };
 
         if changed {
@@ -369,4 +367,3 @@ impl Lobby {
         changed
     }
 }
-

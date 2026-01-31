@@ -14,11 +14,11 @@ pub struct LoginPacket {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JiggyPacket {
-    #[serde(rename = "LevelId")]
-    pub level_id: i32,
+    #[serde(rename = "JiggyEnumId")]
+    pub jiggy_enum_id: i32,
 
-    #[serde(rename = "JiggyId")]
-    pub jiggy_id: i32,
+    #[serde(rename = "CollectedValue")]
+    pub collected_value: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,8 +62,8 @@ pub struct LevelOpenedPacket {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BroadcastJiggy {
-    pub level_id: i32,
-    pub jiggy_id: i32,
+    pub jiggy_enum_id: i32,
+    pub collected_value: i32,
     pub collector: String
 }
 

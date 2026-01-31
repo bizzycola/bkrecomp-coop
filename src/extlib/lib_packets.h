@@ -30,10 +30,10 @@ enum class PacketType : uint8_t
 
 struct JiggyPacket
 {
-    int LevelId;
-    int JiggyId;
+    int JiggyEnumId;
+    int CollectedValue;
 
-    MSGPACK_DEFINE(LevelId, JiggyId);
+    MSGPACK_DEFINE(JiggyEnumId, CollectedValue);
 };
 
 struct NotePacket
@@ -109,11 +109,11 @@ struct PuppetUpdatePacket
 // Broadcast packets (received from server)
 struct BroadcastJiggy
 {
-    int level_id;
-    int jiggy_id;
+    int jiggy_enum_id;
+    int collected_value;
     std::string collector;
 
-    MSGPACK_DEFINE(level_id, jiggy_id, collector);
+    MSGPACK_DEFINE(jiggy_enum_id, collected_value, collector);
 };
 
 struct BroadcastNote
