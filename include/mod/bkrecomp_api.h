@@ -18,6 +18,20 @@ typedef enum {
 // ActorMarkers
 typedef u32 MarkerExtensionId;
 
+// Props
+typedef u32 PropExtensionId;
+
+// Note Saving Functions
+RECOMP_IMPORT("*", bool bkrecomp_is_note_collected(enum map_e map_id, enum level_e level_id, u8 note_index));
+RECOMP_IMPORT("*", void bkrecomp_set_note_collected(enum map_e map_id, enum level_e level_id, u8 note_index));
+RECOMP_IMPORT("*", void bkrecomp_collect_dynamic_note(enum map_e map_id, enum level_e level_id));
+RECOMP_IMPORT("*", s32 bkrecomp_dynamic_note_collected_count(enum map_e map_id));
+RECOMP_IMPORT("*", s32 bkrecomp_note_saving_enabled(void));
+RECOMP_IMPORT("*", s32 bkrecomp_note_saving_active(void));
+RECOMP_IMPORT("*", PropExtensionId bkrecomp_notesaving_get_note_saving_prop_extension_id(void));
+
+// ActorMarkers Functions
+
 // Registers an actor marker data extension of a given size that applies to a single type of actor marker specified by `type`.
 // Returns a handle that can be passed to `bkrecomp_get_extended_marker_data` along with an ActorMarker* to get the data.
 // This must be called before any actor markers have spawned. It is recommended to call this from a `recomp_on_init` callback.

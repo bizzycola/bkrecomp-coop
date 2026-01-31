@@ -84,3 +84,43 @@ int sync_is_jiggy_collected(s16 jiggy_enum_id, s16 collected_value)
     }
     return 0;
 }
+
+void sync_add_note(int map_id, int level_id, bool is_dynamic, int note_index)
+{
+    for (int i = 0; i < g_collection_state.note_count; i++)
+    {
+        NoteIdentifier *note = &g_collection_state.collected_notes[i];
+        if (note->map_id == map_id && note->level_id == level_id &&
+            note->is_dynamic == is_dynamic && note->note_index == note_index)
+        {
+            return;
+        }
+    }
+
+    if (g_collection_state.note_count >= MAX_COLLECTED_NOTES)
+    {
+        return;
+    }
+
+    NoteIdentifier *note = &g_collection_state.collected_notes[g_collection_state.note_count];
+    note->map_id = map_id;
+    note->level_id = level_id;
+    note->is_dynamic = is_dynamic;
+    note->note_index = note_index;
+
+    g_collection_state.note_count++;
+}
+
+int sync_is_note_collected(s16 map_id, s16 level_id, bool is_dynamic, s16 note_index)
+{
+    for (int i = 0; i < g_collection_state.note_count; i++)
+    {
+        NoteIdentifier *note = &g_collection_state.collected_notes[i];
+        if (note->map_id == map_id && note->level_id == level_id &&
+            note->is_dynamic == is_dynamic && note->note_index == note_index)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}

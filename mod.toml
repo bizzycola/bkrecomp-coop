@@ -53,7 +53,8 @@ native_libraries = [
         "native_connect_to_server",
         "native_update_network",
         "native_disconnect_from_server",
-        "native_sync_jiggy"
+        "native_sync_jiggy",
+        "native_sync_note"
     ] }
 ]
 

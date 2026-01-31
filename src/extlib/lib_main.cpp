@@ -178,3 +178,18 @@ RECOMP_DLL_FUNC(native_sync_jiggy)
 
     RECOMP_RETURN(int, 1);
 }
+
+RECOMP_DLL_FUNC(native_sync_note)
+{
+    int mapId = RECOMP_ARG(int, 0);
+    int levelId = RECOMP_ARG(int, 1);
+    bool isDynamic = RECOMP_ARG(bool, 2);
+    int noteIndex = RECOMP_ARG(int, 3);
+
+    if (g_networkClient != nullptr)
+    {
+        g_networkClient->SendNote(mapId, levelId, isDynamic, noteIndex);
+    }
+
+    RECOMP_RETURN(int, 1);
+}

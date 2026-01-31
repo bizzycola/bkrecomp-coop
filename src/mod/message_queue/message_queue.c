@@ -6,6 +6,7 @@
 #include "recomputils.h"
 #include "../sync/sync.h"
 #include "../collection/collection.h"
+#include "bkrecomp_api.h"
 
 RECOMP_IMPORT(".", int native_poll_message(void *buffer));
 
@@ -64,6 +65,13 @@ void process_queue_message(const GameMessage *msg)
         int levelId = msg->param2;
         int isDynamic = (msg->param3 != 0);
         int noteIndex = msg->param4;
+
+        if (!sync_is_note_collected(mapId, levelId, isDynamic, noteIndex))
+        {
+            sync_add_note(mapId, levelId, isDynamic, noteIndex);
+
+            collect_note(mapId, levelId, isDynamic, noteIndex);
+        }
         break;
     }
 
