@@ -6,7 +6,9 @@ It's based both on the BK mod template, and also the [LT-Schmiddy MM Recomp Mod 
 ## Status
 At the moment, the mod has a functioning server with lobbies, and it syncs collected jiggies.
 
-Puppets are work in progress, I have sidelined a working implementation of note syncing but it requires hacking the recomp note saving code (and by hacking I mean completely replacing it and forcing players to disable the original one in the settings). I can ship with this, but I'm hopeful we can just update recomp to export all the required events and functions for me to just hook directly into it instead of replacing it which is less than ideal.
+Puppets are work in progress.
+
+Note syncing works, but is dependent on [this](https://github.com/BanjoRecomp/BanjoRecomp/pull/241) PR on the recomp project being merged.
 
 ## Server
 The Rust server for the mod is also included in this repo under the `server/` directory.
