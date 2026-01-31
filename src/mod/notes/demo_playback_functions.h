@@ -1,1 +1,0 @@
-bool recomp_in_demo_playback_game_mode();

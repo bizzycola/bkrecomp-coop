@@ -1,0 +1,29 @@
+[server]
+# server port
+port = 8756
+
+# max number of lobbies supported at one time
+max_lobbies = 100
+
+# max players per lobby
+max_players_per_lobby = 16
+
+# how long to wait without packets before considering a client disconnected
+client_timeout_seconds = 60
+
+# how long to wait without players before closing the lobby
+lobby_idle_timeout_seconds = 300
+
+# whether to save lobbies as JSON files to disk
+enable_persistence = true
+
+# where to save persisted lobby JSON files
+persistence_dir = "./lobbies"
+
+[logging]
+# log level: trace, debug, info, warn, error
+level = "info"
+
+# log to file
+log_to_file = true
+log_file = "server.log"

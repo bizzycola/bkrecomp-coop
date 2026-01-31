@@ -1,4 +1,5 @@
-// debug_log.h
+// Allows saving to a log file from lib
+
 #ifndef DEBUG_LOG_H
 #define DEBUG_LOG_H
 

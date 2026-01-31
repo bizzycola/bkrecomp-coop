@@ -48,22 +48,11 @@ native_libraries = [
 # Example native library:
 #    { name = "my_native_library", funcs = ["my_native_library_function"] }
     { name = "bkrecomp_coop_extlib", funcs = [
-        "native_lib_test", 
-        "net_init", 
-        "net_send_pos", 
-        "net_update", 
-        "net_test_udp",
-        "net_msg_consume", 
-        # "net_msg_get_chunk", 
-        # "net_msg_get_len", 
-        "net_msg_poll",
-        "net_send_jiggy",
-        "net_msg_get_text_len",
-        "net_msg_get_text_chunk",
-        "net_msg_get_data_len",
-        "net_msg_get_data_chunk",
-        "net_msg_get_data_int",
-        "net_send_note"
+        "native_lib_test",
+        "native_poll_message",
+        "native_connect_to_server",
+        "native_update_network",
+        "native_disconnect_from_server"
     ] }
 ]
 

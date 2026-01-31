@@ -5,7 +5,9 @@ target_include_directories(${TARGET_NAME} PUBLIC
 
 
 target_sources(${TARGET_NAME} PRIVATE
+    "lib_net.cpp"
     "lib_main.cpp"
+    "lib_message_queue.cpp"
 )
 
 if(CMAKE_C_COMPILER_TARGET MATCHES "windows" OR WIN32)

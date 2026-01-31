@@ -1,0 +1,50 @@
+#include "modding.h"
+#include "functions.h"
+#include "variables.h"
+
+typedef struct
+{
+    s16 map_id;
+    s16 x;
+    s16 y;
+    s16 z;
+} NoteIdentifier;
+
+typedef struct
+{
+    s16 level_id;
+    s16 jiggy_id;
+} JiggyIdentifier;
+
+typedef struct
+{
+    s16 map_id;
+    s16 actor_id;
+    s16 x;
+    s16 y;
+    s16 z;
+} ActorCollectibleIdentifier;
+
+typedef struct
+{
+    NoteIdentifier collected_notes[MAX_COLLECTED_NOTES];
+    int note_count;
+
+    JiggyIdentifier collected_jiggies[MAX_COLLECTED_JIGGIES];
+    int jiggy_count;
+
+    ActorCollectibleIdentifier collected_honeycombs[MAX_COLLECTED_HONEYCOMBS];
+    int honeycomb_count;
+
+    ActorCollectibleIdentifier collected_tokens[MAX_COLLECTED_TOKENS];
+    int token_count;
+
+    ActorCollectibleIdentifier collected_jinjos[MAX_COLLECTED_JINJOS];
+    int jinjo_count;
+} CollectionState;
+
+void sync_init(void);
+void sync_clear(void);
+
+void sync_add_jiggy(int level_id, int jiggy_id);
+int sync_is_jiggy_collected(s16 level_id, s16 jiggy_id);

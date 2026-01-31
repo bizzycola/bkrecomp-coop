@@ -20,3 +20,5 @@ binaries/
 downloads/
 build/
 build2/
+TEMP/
+server/target/
