@@ -99,10 +99,10 @@ if platform.system() == "Windows":
     
     add_archive_download_and_extract(
         "zig",
-        "https://ziglang.org/download/0.14.1/zig-x86_64-windows-0.14.1.zip",
+        "https://ziglang.org/download/0.13.0/zig-windows-x86_64-0.13.0.zip",
         binaries_dir.joinpath("zig_win")
     )
-    zig_dir_path = binaries_dir.joinpath("zig_win/zig-x86_64-windows-0.14.1")
+    zig_dir_path = binaries_dir.joinpath("zig_win/zig-windows-x86_64-0.13.0")
     zig_bin_path = zig_dir_path.joinpath("zig.exe")
     
 elif platform.system() == "Darwin":

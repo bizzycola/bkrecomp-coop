@@ -1,4 +1,4 @@
-#[repr(u8)]
+﻿#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketType {
     Handshake = 1,
@@ -9,6 +9,12 @@ pub enum PacketType {
     FullSyncRequest = 10,
     NoteSaveData = 11,
     InitialSaveDataRequest = 12,
+    FileProgressFlags = 13,
+    AbilityProgress = 14,
+    HoneycombScore = 15,
+    MumboScore = 16,
+    HoneycombCollected = 17,
+    MumboTokenCollected = 18,
     PuppetUpdate = 20,
     PuppetSyncRequest = 21,
     PlayerPosition = 50,
@@ -16,6 +22,7 @@ pub enum PacketType {
     NoteCollected = 52,
     NoteCollectedPos = 53,
     LevelOpened = 54,
+    ReliableAck = 60,
     Unknown = 255
 }
 
@@ -30,6 +37,12 @@ impl From<u8> for PacketType {
             10 => PacketType::FullSyncRequest,
             11 => PacketType::NoteSaveData,
             12 => PacketType::InitialSaveDataRequest,
+            13 => PacketType::FileProgressFlags,
+            14 => PacketType::AbilityProgress,
+            15 => PacketType::HoneycombScore,
+            16 => PacketType::MumboScore,
+            17 => PacketType::HoneycombCollected,
+            18 => PacketType::MumboTokenCollected,
             20 => PacketType::PuppetUpdate,
             21 => PacketType::PuppetSyncRequest,
             50 => PacketType::PlayerPosition,
@@ -37,6 +50,7 @@ impl From<u8> for PacketType {
             52 => PacketType::NoteCollected,
             53 => PacketType::NoteCollectedPos,
             54 => PacketType::LevelOpened,
+            60 => PacketType::ReliableAck,
             _ => PacketType::Unknown
         }
     }

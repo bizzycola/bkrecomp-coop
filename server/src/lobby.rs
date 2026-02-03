@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+﻿use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -27,6 +27,34 @@ pub struct CollectedNote {
 pub struct CollectedJiggy {
     pub level_id: i32,
     pub jiggy_id: i32,
+    pub collected_by: String,
+    pub timestamp: i64,
+}
+
+/**
+ * Keeps all the information for a collected honeycomb
+ */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectedHoneycomb {
+    pub map_id: i32,
+    pub honeycomb_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub collected_by: String,
+    pub timestamp: i64,
+}
+
+/**
+ * Keeps all the information for a collected Mumbo token
+ */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectedMumboToken {
+    pub map_id: i32,
+    pub token_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
     pub collected_by: String,
     pub timestamp: i64,
 }
@@ -90,9 +118,30 @@ pub struct SaveFlags {
     pub level_events: u32,
 
     /**
+     * Full fileProgressFlag blob (BK decomp) used for many progression gates.
+     * Expected size: 0x25 bytes.
+     */
+    pub file_progress_flags: Vec<u8>,
+
+    /**
      * Unlocked moves
      */
     pub moves: u32,
+
+    /**
+     * Raw abilityprogress blob (BK decomp). Expected size: 8 bytes.
+     */
+    pub ability_progress: Vec<u8>,
+
+    /**
+     * Raw honeycombscore blob (BK decomp). Expected size: 0x03 bytes.
+     */
+    pub honeycomb_score: Vec<u8>,
+
+    /**
+     * Raw mumboscore blob (BK decomp). Expected size: 0x10 bytes.
+     */
+    pub mumbo_score: Vec<u8>,
 
     /**
      * Specific individually collected notes
@@ -111,7 +160,11 @@ impl Default for SaveFlags {
             note_totals: vec![0; 0x0f],
             puzzles_completed: vec![0; 11],
             level_events: 0,
+            file_progress_flags: vec![0; 0x25],
             moves: 0,
+            ability_progress: vec![0; 8],
+            honeycomb_score: vec![0; 0x03],
+            mumbo_score: vec![0; 0x10],
             note_save_data: vec![vec![0; 32]; 9],
         }
     }
@@ -167,6 +220,16 @@ pub struct Lobby {
     pub opened_levels: Vec<OpenedLevel>,
 
     /**
+     * Collected honeycombs (event-based, for deterministic despawn)
+     */
+    pub collected_honeycombs: Vec<CollectedHoneycomb>,
+
+    /**
+     * Collected Mumbo tokens (event-based, for deterministic despawn)
+     */
+    pub collected_mumbo_tokens: Vec<CollectedMumboToken>,
+
+    /**
      * General savefile flags
      */
     pub save_flags: SaveFlags,
@@ -186,8 +249,76 @@ impl Lobby {
             collected_jiggies: Vec::new(),
             collected_notes: Vec::new(),
             opened_levels: Vec::new(),
+            collected_honeycombs: Vec::new(),
+            collected_mumbo_tokens: Vec::new(),
             save_flags: SaveFlags::default(),
         }
+    }
+
+    pub fn is_honeycomb_collected(&self, map_id: i32, honeycomb_id: i32) -> bool {
+        self.collected_honeycombs
+            .iter()
+            .any(|h| h.map_id == map_id && h.honeycomb_id == honeycomb_id)
+    }
+
+    pub fn add_collected_honeycomb(
+        &mut self,
+        map_id: i32,
+        honeycomb_id: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        collected_by: String,
+    ) -> bool {
+        if self.is_honeycomb_collected(map_id, honeycomb_id) {
+            return false;
+        }
+
+        self.collected_honeycombs.push(CollectedHoneycomb {
+            map_id,
+            honeycomb_id,
+            x,
+            y,
+            z,
+            collected_by,
+            timestamp: chrono::Utc::now().timestamp(),
+        });
+
+        self.update_activity();
+        true
+    }
+
+    pub fn is_mumbo_token_collected(&self, map_id: i32, token_id: i32) -> bool {
+        self.collected_mumbo_tokens
+            .iter()
+            .any(|t| t.map_id == map_id && t.token_id == token_id)
+    }
+
+    pub fn add_collected_mumbo_token(
+        &mut self,
+        map_id: i32,
+        token_id: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        collected_by: String,
+    ) -> bool {
+        if self.is_mumbo_token_collected(map_id, token_id) {
+            return false;
+        }
+
+        self.collected_mumbo_tokens.push(CollectedMumboToken {
+            map_id,
+            token_id,
+            x,
+            y,
+            z,
+            collected_by,
+            timestamp: chrono::Utc::now().timestamp(),
+        });
+
+        self.update_activity();
+        true
     }
 
     pub fn update_activity(&mut self) {
@@ -359,6 +490,46 @@ impl Lobby {
                 changed = true
             }
         }
+
+        if changed {
+            self.update_activity();
+        }
+
+        changed
+    }
+
+    pub fn update_file_progress_flags(&mut self, data: &[u8]) -> bool {
+        let changed = Self::merge_flags(&mut self.save_flags.file_progress_flags, data);
+
+        if changed {
+            self.update_activity();
+        }
+
+        changed
+    }
+
+    pub fn update_ability_progress(&mut self, data: &[u8]) -> bool {
+        let changed = Self::merge_flags(&mut self.save_flags.ability_progress, data);
+
+        if changed {
+            self.update_activity();
+        }
+
+        changed
+    }
+
+    pub fn update_honeycomb_score(&mut self, data: &[u8]) -> bool {
+        let changed = Self::merge_flags(&mut self.save_flags.honeycomb_score, data);
+
+        if changed {
+            self.update_activity();
+        }
+
+        changed
+    }
+
+    pub fn update_mumbo_score(&mut self, data: &[u8]) -> bool {
+        let changed = Self::merge_flags(&mut self.save_flags.mumbo_score, data);
 
         if changed {
             self.update_activity();

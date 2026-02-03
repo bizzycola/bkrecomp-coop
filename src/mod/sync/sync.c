@@ -2,10 +2,8 @@
 #include "sync.h"
 #include "../message_queue/message_queue.h"
 
-// tolerance is for matching positions within this range
 #define POS_TOLERANCE 10
 
-// local sync state
 CollectionState g_collection_state = {0};
 
 extern struct
@@ -27,12 +25,87 @@ void sync_init(void)
 {
     g_collection_state.note_count = 0;
     g_collection_state.jiggy_count = 0;
+    g_collection_state.honeycomb_count = 0;
+    g_collection_state.token_count = 0;
+    g_collection_state.jinjo_count = 0;
 }
 
 void sync_clear(void)
 {
     g_collection_state.note_count = 0;
     g_collection_state.jiggy_count = 0;
+    g_collection_state.honeycomb_count = 0;
+    g_collection_state.token_count = 0;
+    g_collection_state.jinjo_count = 0;
+}
+
+static void sync_add_actor_collectible(ActorCollectibleIdentifier *arr, int *count, int maxCount,
+                                      s16 map_id, s16 actor_id, s16 x, s16 y, s16 z)
+{
+    if (!arr || !count)
+        return;
+
+    for (int i = 0; i < *count; i++)
+    {
+        ActorCollectibleIdentifier *it = &arr[i];
+        if (it->map_id == map_id && it->actor_id == actor_id)
+        {
+            return;
+        }
+    }
+
+    if (*count >= maxCount)
+        return;
+
+    ActorCollectibleIdentifier *it = &arr[*count];
+    it->map_id = map_id;
+    it->actor_id = actor_id;
+    it->x = x;
+    it->y = y;
+    it->z = z;
+
+    (*count)++;
+}
+
+static int sync_is_actor_collectible_collected(const ActorCollectibleIdentifier *arr, int count,
+                                               s16 map_id, s16 actor_id)
+{
+    if (!arr)
+        return 0;
+
+    for (int i = 0; i < count; i++)
+    {
+        const ActorCollectibleIdentifier *it = &arr[i];
+        if (it->map_id == map_id && it->actor_id == actor_id)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void sync_add_honeycomb(int map_id, int honeycomb_id, s16 x, s16 y, s16 z)
+{
+    sync_add_actor_collectible(g_collection_state.collected_honeycombs, &g_collection_state.honeycomb_count,
+                              MAX_COLLECTED_HONEYCOMBS, (s16)map_id, (s16)honeycomb_id, x, y, z);
+}
+
+int sync_is_honeycomb_collected(s16 map_id, s16 honeycomb_id)
+{
+    return sync_is_actor_collectible_collected(g_collection_state.collected_honeycombs, g_collection_state.honeycomb_count,
+                                               map_id, honeycomb_id);
+}
+
+void sync_add_token(int map_id, int token_id, s16 x, s16 y, s16 z)
+{
+    sync_add_actor_collectible(g_collection_state.collected_tokens, &g_collection_state.token_count,
+                              MAX_COLLECTED_TOKENS, (s16)map_id, (s16)token_id, x, y, z);
+}
+
+int sync_is_token_collected(s16 map_id, s16 token_id)
+{
+    return sync_is_actor_collectible_collected(g_collection_state.collected_tokens, g_collection_state.token_count,
+                                               map_id, token_id);
 }
 
 int positions_match(s16 x1, s16 y1, s16 z1, s16 x2, s16 y2, s16 z2)
@@ -55,7 +128,6 @@ int positions_match(s16 x1, s16 y1, s16 z1, s16 x2, s16 y2, s16 z2)
 
 void sync_add_jiggy(int jiggy_enum_id, int collected_value)
 {
-    // don't track if we already have this jiggy
     for (int i = 0; i < g_collection_state.jiggy_count; i++)
     {
         JiggyIdentifier *jiggy = &g_collection_state.collected_jiggies[i];

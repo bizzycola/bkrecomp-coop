@@ -56,3 +56,9 @@ void sync_add_jiggy(int jiggy_enum_id, int collected_value);
 int sync_is_jiggy_collected(s16 jiggy_enum_id, s16 collected_value);
 void sync_add_note(int map_id, int level_id, bool is_dynamic, int note_index);
 int sync_is_note_collected(s16 map_id, s16 level_id, bool is_dynamic, s16 note_index);
+
+void sync_add_honeycomb(int map_id, int honeycomb_id, s16 x, s16 y, s16 z);
+int sync_is_honeycomb_collected(s16 map_id, s16 honeycomb_id);
+
+void sync_add_token(int map_id, int token_id, s16 x, s16 y, s16 z);
+int sync_is_token_collected(s16 map_id, s16 token_id);

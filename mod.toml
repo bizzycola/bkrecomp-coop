@@ -49,12 +49,22 @@ native_libraries = [
 #    { name = "my_native_library", funcs = ["my_native_library_function"] }
     { name = "bkrecomp_coop_extlib", funcs = [
         "native_lib_test",
-        "native_poll_message",
+        "net_msg_poll",
         "native_connect_to_server",
         "native_update_network",
         "native_disconnect_from_server",
         "native_sync_jiggy",
-        "native_sync_note"
+        "native_sync_note",
+        "native_send_level_opened",
+        "native_upload_initial_save_data",
+        "native_send_file_progress_flags",
+        "native_send_ability_progress",
+        "native_send_honeycomb_score",
+        "native_send_mumbo_score",
+        "native_send_honeycomb_collected",
+        "native_send_mumbo_token_collected",
+        "net_send_puppet_update",
+        "GetClockMS"
     ] }
 ]
 
@@ -95,11 +105,11 @@ percent = false
 default = 1
 
 [[manifest.config_options]]
-id = "string_option"
-name = "String Option"
-description = "Test string config option."
+id = "coop_skip_connect"
+name = "Connection Skip"
+description = "(debug) set as '1' to skip connecting to server"
 type = "String"
-default = "Lorem Ipsum"
+default = "0"
 
 # Server URL
 [[manifest.config_options]]

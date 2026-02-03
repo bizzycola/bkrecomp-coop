@@ -1,7 +1,10 @@
 #include "lib_net.h"
+#include "debug_log.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
+
+extern void coop_dll_log(const char *msg);
 
 const uint32_t HANDSHAKE_INTERVAL_MS = 1000;
 const uint32_t PING_INTERVAL_MS = 10000;
@@ -179,7 +182,6 @@ void NetworkClient::Update()
             {
                 m_isConnected = true;
                 m_lastPacketSentTime = now;
-                std::cout << "[Net] Connected!" << std::endl;
                 RequestFullSync();
             }
 
@@ -211,6 +213,21 @@ void NetworkClient::Update()
                 break;
             case PacketType::Pong:
                 break;
+            case PacketType::InitialSaveDataRequest:
+                // TODO: implement handler
+                break;
+            case PacketType::FileProgressFlags:
+                // TODO: implement handler
+                break;
+            case PacketType::AbilityProgress:
+                // TODO: implement handler
+                break;
+            case PacketType::HoneycombScore:
+                // TODO: implement handler
+                break;
+            case PacketType::MumboScore:
+                // TODO: implement handler
+                break;
             default:
                 break;
             }
@@ -225,6 +242,7 @@ void NetworkClient::Update()
 void NetworkClient::EnqueueEvent(PacketType type, const std::string &text, const std::vector<int32_t> &data, int playerId)
 {
     std::lock_guard<std::mutex> lock(m_queueMutex);
+
     NetEvent e;
     e.type = type;
     e.textData = text;
@@ -336,23 +354,19 @@ void NetworkClient::HandleNoteCollectedPos(const uint8_t *data, int len)
 
 void NetworkClient::HandleNoteSaveData(const uint8_t *data, int len)
 {
-    try
-    {
+    /*
+
+    Original msgpack code:
         msgpack::object_handle oh = msgpack::unpack((const char *)data, len);
         msgpack::object obj = oh.get();
-
         NoteSaveDataPacket packet;
         obj.convert(packet);
 
         std::vector<int32_t> eventData;
         eventData.push_back(packet.LevelIndex);
         eventData.push_back((int32_t)packet.SaveData.size());
-
         EnqueueEvent(PacketType::NoteSaveData, "", eventData);
-    }
-    catch (...)
-    {
-    }
+    */
 }
 
 void NetworkClient::HandlePuppetUpdate(const uint8_t *data, int len)
@@ -403,66 +417,154 @@ void NetworkClient::HandleLevelOpened(const uint8_t *data, int len)
 
 void NetworkClient::SendJiggy(int jiggyEnumId, int collectedValue)
 {
-    JiggyPacket pak;
-    pak.JiggyEnumId = jiggyEnumId;
-    pak.CollectedValue = collectedValue;
-    msgpack::sbuffer sbuf;
-    msgpack::pack(sbuf, pak);
-    SendRawPacket(PacketType::JiggyCollected, sbuf.data(), sbuf.size());
+    uint8_t buffer[8];
+    std::memcpy(&buffer[0], &jiggyEnumId, 4);
+    std::memcpy(&buffer[4], &collectedValue, 4);
+    SendRawPacket(PacketType::JiggyCollected, buffer, 8);
 }
 
 void NetworkClient::SendNote(int mapId, int levelId, bool isDynamic, int noteIndex)
 {
-    NotePacket pak;
-    pak.MapId = mapId;
-    pak.LevelId = levelId;
-    pak.IsDynamic = isDynamic;
-    pak.NoteIndex = noteIndex;
-    msgpack::sbuffer sbuf;
-    msgpack::pack(sbuf, pak);
-    SendRawPacket(PacketType::NoteCollected, sbuf.data(), sbuf.size());
+    uint8_t buffer[13];
+    std::memcpy(&buffer[0], &mapId, 4);
+    std::memcpy(&buffer[4], &levelId, 4);
+    buffer[8] = isDynamic ? 1 : 0;
+    std::memcpy(&buffer[9], &noteIndex, 4);
+    SendRawPacket(PacketType::NoteCollected, buffer, 13);
 }
 
 void NetworkClient::SendNotePos(int mapId, int x, int y, int z)
 {
-    NotePacketPos pak;
-    pak.MapId = mapId;
-    pak.X = (int16_t)x;
-    pak.Y = (int16_t)y;
-    pak.Z = (int16_t)z;
-    msgpack::sbuffer sbuf;
-    msgpack::pack(sbuf, pak);
-    SendRawPacket(PacketType::NoteCollectedPos, sbuf.data(), sbuf.size());
+    uint8_t buffer[10];
+    std::memcpy(&buffer[0], &mapId, 4);
+    int16_t x16 = (int16_t)x;
+    int16_t y16 = (int16_t)y;
+    int16_t z16 = (int16_t)z;
+    std::memcpy(&buffer[4], &x16, 2);
+    std::memcpy(&buffer[6], &y16, 2);
+    std::memcpy(&buffer[8], &z16, 2);
+    SendRawPacket(PacketType::NoteCollectedPos, buffer, 10);
 }
 
 void NetworkClient::SendNoteSaveData(int levelIndex, const std::vector<uint8_t> &saveData)
 {
-    NoteSaveDataPacket pak;
-    pak.LevelIndex = levelIndex;
-    pak.SaveData = saveData;
-    msgpack::sbuffer sbuf;
-    msgpack::pack(sbuf, pak);
-    SendRawPacket(PacketType::NoteSaveData, sbuf.data(), sbuf.size());
+    std::vector<uint8_t> buffer;
+    buffer.resize(4 + saveData.size());
+    std::memcpy(&buffer[0], &levelIndex, 4);
+    if (!saveData.empty())
+    {
+        std::memcpy(&buffer[4], saveData.data(), saveData.size());
+    }
+    SendRawPacket(PacketType::NoteSaveData, buffer.data(), buffer.size());
 }
 
 void NetworkClient::SendLevelOpened(int worldId, int jiggyCost)
 {
-    LevelOpenedPacket pak;
-    pak.WorldId = worldId;
-    pak.JiggyCost = jiggyCost;
-    msgpack::sbuffer sbuf;
-    msgpack::pack(sbuf, pak);
-    SendRawPacket(PacketType::LevelOpened, sbuf.data(), sbuf.size());
+    uint8_t buffer[8];
+    std::memcpy(&buffer[0], &worldId, 4);
+    std::memcpy(&buffer[4], &jiggyCost, 4);
+    SendRawPacket(PacketType::LevelOpened, buffer, 8);
 }
 
 void NetworkClient::SendPuppetUpdate(const PuppetUpdatePacket &pak)
 {
-    msgpack::sbuffer sbuf;
-    msgpack::pack(sbuf, pak);
-    SendRawPacket(PacketType::PuppetUpdate, sbuf.data(), sbuf.size());
+    std::vector<uint8_t> buffer;
+    buffer.reserve(128); // Reserve enough space
+
+    auto write_float = [&buffer](float f)
+    {
+        uint32_t bits;
+        std::memcpy(&bits, &f, sizeof(float));
+        buffer.push_back((bits >> 24) & 0xFF);
+        buffer.push_back((bits >> 16) & 0xFF);
+        buffer.push_back((bits >> 8) & 0xFF);
+        buffer.push_back(bits & 0xFF);
+    };
+
+    write_float(pak.x);
+    write_float(pak.y);
+    write_float(pak.z);
+    write_float(pak.yaw);
+    write_float(pak.pitch);
+    write_float(pak.roll);
+    write_float(pak.anim_duration);
+    write_float(pak.anim_timer);
+
+    buffer.push_back((pak.level_id >> 8) & 0xFF);
+    buffer.push_back(pak.level_id & 0xFF);
+    buffer.push_back((pak.map_id >> 8) & 0xFF);
+    buffer.push_back(pak.map_id & 0xFF);
+
+    buffer.push_back((pak.anim_id >> 8) & 0xFF);
+    buffer.push_back(pak.anim_id & 0xFF);
+
+    buffer.push_back(pak.model_id);
+    buffer.push_back(pak.flags);
+    buffer.push_back(pak.playback_type);
+    buffer.push_back(pak.playback_direction);
+
+    SendRawPacket(PacketType::PuppetUpdate, buffer.data(), buffer.size());
 }
 
 void NetworkClient::RequestFullSync()
 {
     SendRawPacket(PacketType::FullSyncRequest, nullptr, 0);
+}
+
+void NetworkClient::SendFileProgressFlags(const std::vector<uint8_t> &flags)
+{
+    if (!flags.empty())
+    {
+        SendRawPacket(PacketType::FileProgressFlags, flags.data(), flags.size());
+    }
+}
+
+void NetworkClient::SendAbilityProgress(const std::vector<uint8_t> &bytes)
+{
+    if (!bytes.empty())
+    {
+        SendRawPacket(PacketType::AbilityProgress, bytes.data(), bytes.size());
+    }
+}
+
+void NetworkClient::SendHoneycombScore(const std::vector<uint8_t> &bytes)
+{
+    if (!bytes.empty())
+    {
+        SendRawPacket(PacketType::HoneycombScore, bytes.data(), bytes.size());
+    }
+}
+
+void NetworkClient::SendMumboScore(const std::vector<uint8_t> &bytes)
+{
+    if (!bytes.empty())
+    {
+        SendRawPacket(PacketType::MumboScore, bytes.data(), bytes.size());
+    }
+}
+
+void NetworkClient::SendHoneycombCollected(int mapId, int honeycombId, int x, int y, int z)
+{
+    uint8_t buffer[20];
+    std::memcpy(&buffer[0], &mapId, 4);
+    std::memcpy(&buffer[4], &honeycombId, 4);
+    std::memcpy(&buffer[8], &x, 4);
+    std::memcpy(&buffer[12], &y, 4);
+    std::memcpy(&buffer[16], &z, 4);
+    SendRawPacket(PacketType::HoneycombCollected, buffer, 20);
+}
+
+void NetworkClient::SendMumboTokenCollected(int mapId, int tokenId, int x, int y, int z)
+{
+    uint8_t buffer[20];
+    std::memcpy(&buffer[0], &mapId, 4);
+    std::memcpy(&buffer[4], &tokenId, 4);
+    std::memcpy(&buffer[8], &x, 4);
+    std::memcpy(&buffer[12], &y, 4);
+    std::memcpy(&buffer[16], &z, 4);
+    SendRawPacket(PacketType::MumboTokenCollected, buffer, 20);
+}
+
+void NetworkClient::UploadInitialSaveData()
+{
 }

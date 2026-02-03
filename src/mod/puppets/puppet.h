@@ -7,6 +7,7 @@
 
 #define MARKER_PUPPET 0x400
 #define ACTOR_PUPPET 0x400
+
 // Low poly Banjo model
 // Pretty sure this is what ModLoader co-op uses
 #define MODEL_BANJO_LOW_POLY 0x34E
@@ -17,7 +18,7 @@
 
 typedef struct
 {
-    Actor *actor;
+    ActorMarker *marker;
     int player_id;
     int is_spawned;
     enum map_e last_map;
@@ -35,7 +36,7 @@ void puppet_despawn(Actor *puppet);
 void puppet_despawn_all(void);
 
 void puppet_update_position(Actor *puppet, f32 position[3], f32 yaw);
-void puppet_update_animation(Actor *puppet, u16 anim_id);
+void puppet_update_animation(Actor *puppet, u16 anim_id, f32 duration, f32 timer, u8 playback_type, u8 playback_direction);
 
 u16 puppet_get_idle_anim(void);
 u16 puppet_get_walk_anim(void);
@@ -59,11 +60,15 @@ typedef struct
 {
     f32 x, y, z;
     f32 yaw, pitch, roll;
+    f32 anim_duration;
+    f32 anim_timer;
     s16 map_id;
     s16 level_id;
     u16 anim_id;
     u8 model_id;
     u8 flags;
+    u8 playback_type;
+    u8 playback_direction;
 } PuppetUpdateData;
 #pragma pack(pop)
 

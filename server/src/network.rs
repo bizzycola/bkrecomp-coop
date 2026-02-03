@@ -1,4 +1,5 @@
-use anyhow::Result;
+﻿use anyhow::Result;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,6 +15,19 @@ use crate::state::ServerState;
 pub struct NetworkServer {
     socket: Arc<UdpSocket>,
     state: Arc<ServerState>,
+
+    last_reliable_seq: tokio::sync::Mutex<HashMap<(SocketAddr, u8), u32>>,
+
+    reliable_next_seq: std::sync::atomic::AtomicU32,
+    reliable_pending: tokio::sync::Mutex<HashMap<(SocketAddr, u32), PendingReliable>>,
+}
+
+#[derive(Clone)]
+struct PendingReliable {
+    packet_type: PacketType,
+    payload: Vec<u8>,
+    last_send_ms: u64,
+    attempts: u8,
 }
 
 impl NetworkServer {
@@ -21,7 +35,60 @@ impl NetworkServer {
         Self {
             socket,
             state: Arc::new(ServerState::new(config)),
+            last_reliable_seq: tokio::sync::Mutex::new(HashMap::new()),
+            reliable_next_seq: std::sync::atomic::AtomicU32::new(1),
+            reliable_pending: tokio::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    fn is_reliable_type(packet_type: PacketType) -> bool {
+        matches!(
+            packet_type,
+            PacketType::JiggyCollected
+                | PacketType::NoteCollected
+                | PacketType::NoteCollectedPos
+                | PacketType::NoteSaveData
+                | PacketType::FileProgressFlags
+                | PacketType::AbilityProgress
+                | PacketType::HoneycombScore
+                | PacketType::MumboScore
+                | PacketType::HoneycombCollected
+                | PacketType::MumboTokenCollected
+                | PacketType::LevelOpened
+                | PacketType::FullSyncRequest
+        )
+    }
+
+    async fn maybe_strip_reliable_prefix(
+        &self,
+        packet_type: PacketType,
+        payload: &[u8],
+        addr: SocketAddr,
+    ) -> Result<Option<Vec<u8>>> {
+        if !Self::is_reliable_type(packet_type) {
+            return Ok(Some(payload.to_vec()));
+        }
+
+        if payload.len() < 4 {
+            return Ok(None);
+        }
+
+        let seq = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+
+        self.send_packet(PacketType::ReliableAck, &seq.to_le_bytes(), addr)
+            .await?;
+
+        {
+            let mut map = self.last_reliable_seq.lock().await;
+            let key = (addr, packet_type as u8);
+            let last = map.get(&key).copied().unwrap_or(0);
+            if seq <= last {
+                return Ok(None);
+            }
+            map.insert(key, seq);
+        }
+
+        Ok(Some(payload[4..].to_vec()))
     }
 
     pub async fn run(self) -> Result<()> {
@@ -32,7 +99,84 @@ impl NetworkServer {
             cleanup_server.cleanup_loop().await;
         });
 
+        let resend_server = server.clone();
+        tokio::spawn(async move {
+            resend_server.reliable_resend_loop().await;
+        });
+
         server.receive_loop().await
+    }
+
+    fn now_ms() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+
+    async fn reliable_resend_loop(&self) {
+        const SWEEP_MS: u64 = 250;
+        const RETRY_TIMEOUT_MS: u64 = 600;
+        const MAX_ATTEMPTS: u8 = 10;
+        const MAX_PENDING: usize = 2048;
+
+        let mut interval = time::interval(Duration::from_millis(SWEEP_MS));
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {},
+                _ = tokio::signal::ctrl_c() => {
+                    debug!("Reliable resend loop shutting down (ctrl-c)");
+                    return;
+                }
+            }
+
+            let now = Self::now_ms();
+
+            let mut resend: Vec<(SocketAddr, u32, PacketType, Vec<u8>, u8)> = Vec::new();
+            let mut to_remove: Vec<(SocketAddr, u32)> = Vec::new();
+
+            {
+                let mut pending = self.reliable_pending.lock().await;
+
+                if pending.len() > MAX_PENDING {
+                    pending.clear();
+                }
+
+                for (key, entry) in pending.iter_mut() {
+                    if entry.attempts >= MAX_ATTEMPTS {
+                        to_remove.push(*key);
+                        continue;
+                    }
+
+                    if entry.last_send_ms == 0 || now.saturating_sub(entry.last_send_ms) >= RETRY_TIMEOUT_MS {
+                        let (addr, seq) = *key;
+                        entry.attempts = entry.attempts.saturating_add(1);
+                        entry.last_send_ms = now;
+                        resend.push((addr, seq, entry.packet_type, entry.payload.clone(), entry.attempts));
+                    }
+                }
+
+                for k in to_remove.iter() {
+                    pending.remove(k);
+                }
+            }
+
+            for (addr, seq, packet_type, payload, attempt) in resend {
+                debug!(
+                    "reliable resend -> {} type={:?} seq={} attempt={} bytes={}",
+                    addr,
+                    packet_type,
+                    seq,
+                    attempt,
+                    payload.len()
+                );
+                let _ = self
+                    .send_packet_reliable_with_seq(packet_type, &payload, addr, seq)
+                    .await;
+            }
+        }
     }
 
     async fn receive_loop(&self) -> Result<()> {
@@ -81,17 +225,50 @@ impl NetworkServer {
         let packet_type = PacketType::from(data[0]);
         let payload = &data[1..];
 
+        let payload_buf_opt = match packet_type {
+            PacketType::ReliableAck => {
+                if payload.len() >= 4 {
+                    let seq = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+                    let mut pending = self.reliable_pending.lock().await;
+                    debug!("reliable ack <- {} seq={} (pending before={})", addr, seq, pending.len());
+                    pending.remove(&(addr, seq));
+                }
+                Some(Vec::new())
+            }
+            _ => self
+                .maybe_strip_reliable_prefix(packet_type, payload, addr)
+                .await?,
+        };
+
+        if payload_buf_opt.is_none() {
+            return Ok(());
+        }
+
+        let payload_buf = payload_buf_opt.unwrap();
+        let payload = payload_buf.as_slice();
+
         match packet_type {
             PacketType::Handshake => self.handle_handshake(payload, addr).await?,
             PacketType::Ping => self.handle_ping(addr).await?,
             PacketType::JiggyCollected => self.handle_jiggy_collected(payload, addr).await?,
+            PacketType::HoneycombCollected => {
+                self.handle_honeycomb_collected(payload, addr).await?
+            }
+            PacketType::MumboTokenCollected => {
+                self.handle_mumbo_token_collected(payload, addr).await?
+            }
             PacketType::NoteCollectedPos => self.handle_note_collected_pos(payload, addr).await?,
             PacketType::NoteCollected => self.handle_note_collected(payload, addr).await?,
             PacketType::FullSyncRequest => self.handle_full_sync_request(addr).await?,
             PacketType::NoteSaveData => self.handle_note_save_data(payload, addr).await?,
+            PacketType::FileProgressFlags => self.handle_file_progress_flags(payload, addr).await?,
+            PacketType::AbilityProgress => self.handle_ability_progress(payload, addr).await?,
+            PacketType::HoneycombScore => self.handle_honeycomb_score(payload, addr).await?,
+            PacketType::MumboScore => self.handle_mumbo_score(payload, addr).await?,
             PacketType::PuppetUpdate => self.handle_puppet_update(payload, addr).await?,
             PacketType::PuppetSyncRequest => self.handle_puppet_sync_request(addr).await?,
             PacketType::LevelOpened => self.handle_level_opened(payload, addr).await?,
+            PacketType::ReliableAck => {}
             _ => {
                 debug!("Unknown packet type: {:?} from {}", packet_type, addr);
             }
@@ -142,21 +319,19 @@ impl NetworkServer {
             p.id
         };
 
-        let is_first_player = {
+        let lobby_needs_initial_save_data = {
             let mut lob = lobby.write().await;
-            let was_empty = lob.player_count() == 0;
-
+            let needs = !lob.has_initial_save_data;
             lob.add_player(player_id, login.username.clone());
-
-            was_empty && !lob.has_initial_save_data
+            needs
         };
 
         self.send_packet(PacketType::Pong, &[], addr).await?;
 
-        if is_first_player {
+        if lobby_needs_initial_save_data {
             info!(
-                "First player {} joined lobby {}, getting save data from player",
-                login.username, login.lobby_name
+                "Lobby {} needs initial save data; requesting upload from {}",
+                login.lobby_name, login.username
             );
             self.send_packet(PacketType::InitialSaveDataRequest, &[], addr)
                 .await?;
@@ -210,6 +385,114 @@ impl NetworkServer {
                 &lobby_name,
                 addr,
                 PacketType::JiggyCollected,
+                &broadcast,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_honeycomb_collected(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
+        let hc: HoneycombCollectedPacket = rmp_serde::from_slice(payload)?;
+
+        let player = self.state.get_player_by_addr(&addr);
+        if player.is_none() {
+            return Ok(());
+        }
+
+        let player_arc = player.unwrap();
+        let (lobby_name, username) = {
+            let p = player_arc.read().await;
+            (p.lobby_name.clone(), p.username.clone())
+        };
+
+        let lobby = self.state.get_lobby(&lobby_name);
+        if lobby.is_none() {
+            return Ok(());
+        }
+
+        let lobby_arc = lobby.unwrap();
+        let added = {
+            let mut l = lobby_arc.write().await;
+            l.add_collected_honeycomb(
+                hc.map_id,
+                hc.honeycomb_id,
+                hc.x,
+                hc.y,
+                hc.z,
+                username.clone(),
+            )
+        };
+
+        if added {
+            let broadcast = BroadcastHoneycombCollected {
+                map_id: hc.map_id,
+                honeycomb_id: hc.honeycomb_id,
+                x: hc.x,
+                y: hc.y,
+                z: hc.z,
+                collector: username,
+            };
+
+            self.broadcast_to_lobby_except(
+                &lobby_name,
+                addr,
+                PacketType::HoneycombCollected,
+                &broadcast,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_mumbo_token_collected(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
+        let tok: MumboTokenCollectedPacket = rmp_serde::from_slice(payload)?;
+
+        let player = self.state.get_player_by_addr(&addr);
+        if player.is_none() {
+            return Ok(());
+        }
+
+        let player_arc = player.unwrap();
+        let (lobby_name, username) = {
+            let p = player_arc.read().await;
+            (p.lobby_name.clone(), p.username.clone())
+        };
+
+        let lobby = self.state.get_lobby(&lobby_name);
+        if lobby.is_none() {
+            return Ok(());
+        }
+
+        let lobby_arc = lobby.unwrap();
+        let added = {
+            let mut l = lobby_arc.write().await;
+            l.add_collected_mumbo_token(
+                tok.map_id,
+                tok.token_id,
+                tok.x,
+                tok.y,
+                tok.z,
+                username.clone(),
+            )
+        };
+
+        if added {
+            let broadcast = BroadcastMumboTokenCollected {
+                map_id: tok.map_id,
+                token_id: tok.token_id,
+                x: tok.x,
+                y: tok.y,
+                z: tok.z,
+                collector: username,
+            };
+
+            self.broadcast_to_lobby_except(
+                &lobby_name,
+                addr,
+                PacketType::MumboTokenCollected,
                 &broadcast,
             )
             .await?;
@@ -370,6 +653,119 @@ impl NetworkServer {
         Ok(())
     }
 
+    async fn handle_file_progress_flags(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
+        let data: FileProgressFlagsPacket = rmp_serde::from_slice(payload)?;
+
+        let player = self.state.get_player_by_addr(&addr);
+        if player.is_none() {
+            return Ok(());
+        }
+
+        let player_arc = player.unwrap();
+        let lobby_name = {
+            let p = player_arc.read().await;
+            p.lobby_name.clone()
+        };
+
+        let lobby = self.state.get_lobby(&lobby_name);
+        if let Some(lobby_arc) = lobby {
+            let mut l = lobby_arc.write().await;
+
+            if l.update_file_progress_flags(&data.flags) {
+                l.has_initial_save_data = true;
+            }
+        }
+
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::FileProgressFlags, &data)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn handle_ability_progress(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
+        let data: AbilityProgressPacket = rmp_serde::from_slice(payload)?;
+
+        let player = self.state.get_player_by_addr(&addr);
+        if player.is_none() {
+            return Ok(());
+        }
+
+        let player_arc = player.unwrap();
+        let lobby_name = {
+            let p = player_arc.read().await;
+            p.lobby_name.clone()
+        };
+
+        let lobby = self.state.get_lobby(&lobby_name);
+        if let Some(lobby_arc) = lobby {
+            let mut l = lobby_arc.write().await;
+            if l.update_ability_progress(&data.bytes) {
+                l.has_initial_save_data = true;
+            }
+        }
+
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::AbilityProgress, &data)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn handle_honeycomb_score(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
+        let data: HoneycombScorePacket = rmp_serde::from_slice(payload)?;
+
+        let player = self.state.get_player_by_addr(&addr);
+        if player.is_none() {
+            return Ok(());
+        }
+
+        let player_arc = player.unwrap();
+        let lobby_name = {
+            let p = player_arc.read().await;
+            p.lobby_name.clone()
+        };
+
+        let lobby = self.state.get_lobby(&lobby_name);
+        if let Some(lobby_arc) = lobby {
+            let mut l = lobby_arc.write().await;
+            if l.update_honeycomb_score(&data.bytes) {
+                l.has_initial_save_data = true;
+            }
+        }
+
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::HoneycombScore, &data)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn handle_mumbo_score(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
+        let data: MumboScorePacket = rmp_serde::from_slice(payload)?;
+
+        let player = self.state.get_player_by_addr(&addr);
+        if player.is_none() {
+            return Ok(());
+        }
+
+        let player_arc = player.unwrap();
+        let lobby_name = {
+            let p = player_arc.read().await;
+            p.lobby_name.clone()
+        };
+
+        let lobby = self.state.get_lobby(&lobby_name);
+        if let Some(lobby_arc) = lobby {
+            let mut l = lobby_arc.write().await;
+            if l.update_mumbo_score(&data.bytes) {
+                l.has_initial_save_data = true;
+            }
+        }
+
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::MumboScore, &data)
+            .await?;
+
+        Ok(())
+    }
+
     async fn handle_full_sync_request(&self, addr: SocketAddr) -> Result<()> {
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -413,7 +809,6 @@ impl NetworkServer {
 
         for target_addr in addresses {
             if target_addr != addr {
-                // Forward with player_id prepended
                 if let Err(e) = self
                     .send_packet(PacketType::PuppetUpdate, &forwarded_payload, target_addr)
                     .await
@@ -494,6 +889,30 @@ impl NetworkServer {
                 .await?;
         }
 
+        let fp = FileProgressFlagsPacket {
+            flags: l.save_flags.file_progress_flags.clone(),
+        };
+        self.send_packet_serialized(PacketType::FileProgressFlags, &fp, addr)
+            .await?;
+
+        let ap = AbilityProgressPacket {
+            bytes: l.save_flags.ability_progress.clone(),
+        };
+        self.send_packet_serialized(PacketType::AbilityProgress, &ap, addr)
+            .await?;
+
+        let hc = HoneycombScorePacket {
+            bytes: l.save_flags.honeycomb_score.clone(),
+        };
+        self.send_packet_serialized(PacketType::HoneycombScore, &hc, addr)
+            .await?;
+
+        let ms = MumboScorePacket {
+            bytes: l.save_flags.mumbo_score.clone(),
+        };
+        self.send_packet_serialized(PacketType::MumboScore, &ms, addr)
+            .await?;
+
         for jiggy in &l.collected_jiggies {
             let broadcast = BroadcastJiggy {
                 jiggy_enum_id: jiggy.level_id,
@@ -504,10 +923,48 @@ impl NetworkServer {
                 .await?;
         }
 
+        for hc in &l.collected_honeycombs {
+            let broadcast = BroadcastHoneycombCollected {
+                map_id: hc.map_id,
+                honeycomb_id: hc.honeycomb_id,
+                x: hc.x,
+                y: hc.y,
+                z: hc.z,
+                collector: hc.collected_by.clone(),
+            };
+            self.send_packet_serialized(PacketType::HoneycombCollected, &broadcast, addr)
+                .await?;
+        }
+
+        for tok in &l.collected_mumbo_tokens {
+            let broadcast = BroadcastMumboTokenCollected {
+                map_id: tok.map_id,
+                token_id: tok.token_id,
+                x: tok.x,
+                y: tok.y,
+                z: tok.z,
+                collector: tok.collected_by.clone(),
+            };
+            self.send_packet_serialized(PacketType::MumboTokenCollected, &broadcast, addr)
+                .await?;
+        }
+
+        for opened in &l.opened_levels {
+            let packet = LevelOpenedPacket {
+                world_id: opened.world_id,
+                jiggy_cost: opened.jiggy_cost,
+            };
+            self.send_packet_serialized(PacketType::LevelOpened, &packet, addr)
+                .await?;
+        }
+
         info!(
-            "Sent full state to player at {} (9 levels of note data, {} jiggies)",
+            "Sent full state to player at {} (9 levels of note data + save blobs + {} jiggies + {} honeycombs + {} tokens + {} opened levels)",
             addr,
-            l.collected_jiggies.len()
+            l.collected_jiggies.len(),
+            l.collected_honeycombs.len(),
+            l.collected_mumbo_tokens.len(),
+            l.opened_levels.len()
         );
 
         Ok(())
@@ -546,7 +1003,7 @@ impl NetworkServer {
 
         for addr in addresses {
             if addr != except_addr {
-                if let Err(e) = self.send_packet(packet_type, &payload, addr).await {
+                if let Err(e) = self.send_packet_maybe_reliable(packet_type, &payload, addr).await {
                     warn!("Failed to send to {}: {}", addr, e);
                 }
             }
@@ -562,7 +1019,72 @@ impl NetworkServer {
         addr: SocketAddr,
     ) -> Result<()> {
         let payload = rmp_serde::to_vec(data)?;
-        self.send_packet(packet_type, &payload, addr).await
+        self.send_packet_maybe_reliable(packet_type, &payload, addr).await
+    }
+
+    async fn send_packet_maybe_reliable(
+        &self,
+        packet_type: PacketType,
+        payload: &[u8],
+        addr: SocketAddr,
+    ) -> Result<()> {
+        if Self::is_reliable_type(packet_type) {
+            self.send_packet_reliable(packet_type, payload, addr).await
+        } else {
+            self.send_packet(packet_type, payload, addr).await
+        }
+    }
+
+    async fn send_packet_reliable(
+        &self,
+        packet_type: PacketType,
+        payload: &[u8],
+        addr: SocketAddr,
+    ) -> Result<()> {
+        const MAX_PENDING_PER_ADDR: usize = 256;
+
+        {
+            let pending = self.reliable_pending.lock().await;
+            let count = pending.keys().filter(|(a, _)| *a == addr).count();
+            if count >= MAX_PENDING_PER_ADDR {
+                return Ok(());
+            }
+        }
+
+        let seq = self
+            .reliable_next_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        {
+            let mut pending = self.reliable_pending.lock().await;
+            pending.insert(
+                (addr, seq),
+                PendingReliable {
+                    packet_type,
+                    payload: payload.to_vec(),
+                    last_send_ms: 0,
+                    attempts: 0,
+                },
+            );
+        }
+
+        self.send_packet_reliable_with_seq(packet_type, payload, addr, seq)
+            .await
+    }
+
+    async fn send_packet_reliable_with_seq(
+        &self,
+        packet_type: PacketType,
+        payload: &[u8],
+        addr: SocketAddr,
+        seq: u32,
+    ) -> Result<()> {
+        let mut buf = Vec::with_capacity(1 + 4 + payload.len());
+        buf.push(packet_type as u8);
+        buf.extend_from_slice(&seq.to_le_bytes());
+        buf.extend_from_slice(payload);
+        self.socket.send_to(&buf, addr).await?;
+        Ok(())
     }
 
     async fn send_packet(

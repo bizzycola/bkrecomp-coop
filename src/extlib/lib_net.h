@@ -52,7 +52,6 @@ private:
     std::queue<NetEvent> m_eventQueue;
     std::mutex m_queueMutex;
 
-    uint32_t GetClockMS();
     bool PerformLazyInit();
     void SendRawPacket(PacketType type, const void* data, size_t size);
     void SendPing();
@@ -80,4 +79,14 @@ public:
     void SendLevelOpened(int worldId, int jiggyCost);
     void SendPuppetUpdate(const PuppetUpdatePacket& packet);
     void RequestFullSync();
+    uint32_t GetClockMS();
+    
+    // Stub methods for new save data (not implemented yet)
+    void SendFileProgressFlags(const std::vector<uint8_t>& flags);
+    void SendAbilityProgress(const std::vector<uint8_t>& bytes);
+    void SendHoneycombScore(const std::vector<uint8_t>& bytes);
+    void SendMumboScore(const std::vector<uint8_t>& bytes);
+    void SendHoneycombCollected(int mapId, int honeycombId, int x, int y, int z);
+    void SendMumboTokenCollected(int mapId, int tokenId, int x, int y, int z);
+    void UploadInitialSaveData();
 };

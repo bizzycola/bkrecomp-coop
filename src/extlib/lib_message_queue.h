@@ -15,6 +15,13 @@ enum class MessageType : uint8_t
     PUPPET_UPDATE = 5,
     LEVEL_OPENED = 6,
     NOTE_SAVE_DATA = 7,
+    INITIAL_SAVE_DATA_REQUEST = 10,
+    FILE_PROGRESS_FLAGS = 11,
+    ABILITY_PROGRESS = 12,
+    HONEYCOMB_SCORE = 13,
+    MUMBO_SCORE = 14,
+    HONEYCOMB_COLLECTED = 15,
+    MUMBO_TOKEN_COLLECTED = 16,
     CONNECTION_STATUS = 8,
     CONNECTION_ERROR = 9,
 };
@@ -29,15 +36,19 @@ struct GameMessage
     int32_t param2;
     int32_t param3;
     int32_t param4;
+    int32_t param5;
+    int32_t param6;
     float paramF1;
     float paramF2;
     float paramF3;
+    float paramF4;
+    float paramF5;
     uint16_t dataSize;
     uint8_t data[MAX_MESSAGE_DATA_SIZE];
 
     GameMessage() : type(0), playerId(-1),
-                    param1(0), param2(0), param3(0), param4(0),
-                    paramF1(0.0f), paramF2(0.0f), paramF3(0.0f),
+                    param1(0), param2(0), param3(0), param4(0), param5(0), param6(0),
+                    paramF1(0.0f), paramF2(0.0f), paramF3(0.0f), paramF4(0.0f), paramF5(0.0f),
                     dataSize(0)
     {
         memset(data, 0, MAX_MESSAGE_DATA_SIZE);

@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+﻿use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginPacket {
@@ -92,6 +92,86 @@ pub struct NoteSaveDataPacket {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileProgressFlagsPacket {
+    #[serde(rename = "Flags")]
+    pub flags: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbilityProgressPacket {
+    #[serde(rename = "Bytes")]
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HoneycombScorePacket {
+    #[serde(rename = "Bytes")]
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MumboScorePacket {
+    #[serde(rename = "Bytes")]
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HoneycombCollectedPacket {
+    #[serde(rename = "MapId")]
+    pub map_id: i32,
+
+    #[serde(rename = "HoneycombId")]
+    pub honeycomb_id: i32,
+
+    #[serde(rename = "X")]
+    pub x: i32,
+
+    #[serde(rename = "Y")]
+    pub y: i32,
+
+    #[serde(rename = "Z")]
+    pub z: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MumboTokenCollectedPacket {
+    #[serde(rename = "MapId")]
+    pub map_id: i32,
+
+    #[serde(rename = "TokenId")]
+    pub token_id: i32,
+
+    #[serde(rename = "X")]
+    pub x: i32,
+
+    #[serde(rename = "Y")]
+    pub y: i32,
+
+    #[serde(rename = "Z")]
+    pub z: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BroadcastHoneycombCollected {
+    pub map_id: i32,
+    pub honeycomb_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub collector: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BroadcastMumboTokenCollected {
+    pub map_id: i32,
+    pub token_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub collector: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PuppetUpdatePacket {
     pub x: f32,
     pub y: f32,
@@ -99,6 +179,7 @@ pub struct PuppetUpdatePacket {
     pub yaw: f32,
     pub pitch: f32,
     pub roll: f32,
+    pub anim_duration: f32,
     pub map_id: i16,
     pub level_id: i16,
     pub anim_id: i16,

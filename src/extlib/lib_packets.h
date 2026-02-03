@@ -19,6 +19,15 @@ enum class PacketType : uint8_t
     FullSyncRequest = 10,
     NoteSaveData = 11,
     InitialSaveDataRequest = 12,
+
+    // Save-derived blobs (reliable, low-rate).
+    FileProgressFlags = 13,
+
+    AbilityProgress = 14,
+    HoneycombScore = 15,
+    MumboScore = 16,
+    HoneycombCollected = 17,
+    MumboTokenCollected = 18,
     PuppetUpdate = 20,
     PuppetSyncRequest = 21,
     PlayerPosition = 50,
@@ -26,6 +35,61 @@ enum class PacketType : uint8_t
     NoteCollected = 52,
     NoteCollectedPos = 53,
     LevelOpened = 54,
+
+    ReliableAck = 60,
+};
+
+struct FileProgressFlagsPacket
+{
+    // Raw bytes from fileProgressFlag_getSizeAndPtr (BK decomp). Expected size: 0x25.
+    std::vector<uint8_t> Flags;
+
+    MSGPACK_DEFINE(Flags);
+};
+
+struct AbilityProgressPacket
+{
+    // Raw bytes from ability_getSizeAndPtr (expected size: 8).
+    std::vector<uint8_t> Moves;
+
+    MSGPACK_DEFINE(Moves);
+};
+
+struct HoneycombScorePacket
+{
+    // Raw bytes from honeycombscore_getSizeAndPtr (expected size: 0x03).
+    std::vector<uint8_t> Flags;
+
+    MSGPACK_DEFINE(Flags);
+};
+
+struct MumboScorePacket
+{
+    // Raw bytes from mumboscore_getSizeAndPtr (expected size: 0x10).
+    std::vector<uint8_t> Flags;
+
+    MSGPACK_DEFINE(Flags);
+};
+struct HoneycombCollectedPacket
+{
+    int MapId;
+    int HoneycombId;
+    int X;
+    int Y;
+    int Z;
+
+    MSGPACK_DEFINE(MapId, HoneycombId, X, Y, Z);
+};
+
+struct MumboTokenCollectedPacket
+{
+    int MapId;
+    int TokenId;
+    int X;
+    int Y;
+    int Z;
+
+    MSGPACK_DEFINE(MapId, TokenId, X, Y, Z);
 };
 
 struct JiggyPacket
@@ -91,22 +155,23 @@ struct PositionPacketRaw
 };
 #pragma pack(pop)
 
-#pragma pack(push, 1)
 struct PuppetUpdatePacket
 {
     float x, y, z;
     float yaw, pitch, roll;
+    float anim_duration;
+    float anim_timer;
     int16_t map_id;
     int16_t level_id;
     int16_t anim_id;
     uint8_t model_id;
     uint8_t flags;
+    uint8_t playback_type;
+    uint8_t playback_direction;
 
-    MSGPACK_DEFINE(x, y, z, yaw, pitch, roll, map_id, level_id, anim_id, model_id, flags);
+    MSGPACK_DEFINE(x, y, z, yaw, pitch, roll, anim_duration, anim_timer, map_id, level_id, anim_id, model_id, flags, playback_type, playback_direction);
 };
-#pragma pack(pop)
 
-// Broadcast packets (received from server)
 struct BroadcastJiggy
 {
     int jiggy_enum_id;

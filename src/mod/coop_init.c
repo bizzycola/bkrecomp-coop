@@ -20,28 +20,339 @@
 #include "collection/collection.h"
 #include "bkrecomp_api.h"
 
-RECOMP_IMPORT(".", int native_lib_test(int param1, float param2, const char *param3));
-RECOMP_IMPORT(".", int native_connect_to_server(const char *host, const char *username, const char *lobby, const char *password));
-RECOMP_IMPORT(".", int native_update_network(void));
-RECOMP_IMPORT(".", int native_disconnect_from_server(void));
-RECOMP_IMPORT(".", int native_sync_jiggy(int jiggyEnumId, int collectedValue));
-RECOMP_IMPORT(".", int native_sync_note(int mapId, int levelId, bool isDynamic, int noteIndex));
+RECOMP_IMPORT(".", int native_lib_test(void));
+RECOMP_IMPORT(".", void native_connect_to_server(char *host, char *username, char *lobby_name, char *password));
+RECOMP_IMPORT(".", void native_update_network(void));
+RECOMP_IMPORT(".", void native_disconnect_from_server(void));
+RECOMP_IMPORT(".", void native_sync_jiggy(int jiggy_enum_id, int collected_value));
+RECOMP_IMPORT(".", void native_sync_note(int map_id, int level_id, int is_dynamic, int note_index));
+RECOMP_IMPORT(".", void native_send_level_opened(int world_id, int jiggy_cost));
+RECOMP_IMPORT(".", void native_upload_initial_save_data(void));
+RECOMP_IMPORT(".", void native_send_file_progress_flags(u8 *data, int size));
+RECOMP_IMPORT(".", void native_send_ability_progress(void *moves_data, int size));
+RECOMP_IMPORT(".", void native_send_honeycomb_score(void *score_data, int size));
+RECOMP_IMPORT(".", void native_send_mumbo_score(void *score_data, int size));
+RECOMP_IMPORT(".", void native_send_honeycomb_collected(int world, int honeycomb_id, int xy_packed, int z));
+RECOMP_IMPORT(".", void native_send_mumbo_token_collected(int world, int token_id, int xy_packed, int z));
+RECOMP_IMPORT(".", unsigned int GetClockMS(void));
+
+extern enum map_e map_get(void);
+extern s32 level_get(void);
+
+extern void fileProgressFlag_getSizeAndPtr(s32 *size, u8 **addr);
+
+#ifndef COOP_DEBUG_LOGS
+#define COOP_DEBUG_LOGS 0
+#endif
+
+static enum map_e s_last_map = 0;
+static s32 s_frames_in_current_map = 0;
+static const s32 MIN_FRAMES_BEFORE_NETWORK = 10;
+
+static int is_real_map(enum map_e map);
+
+static int coop_network_is_safe_now(enum map_e map)
+{
+    if (!is_real_map(map))
+    {
+        return 0;
+    }
+
+    if (s_frames_in_current_map < MIN_FRAMES_BEFORE_NETWORK)
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
+static int s_need_initial_upload = 0;
+
+static int s_need_connect = 0;
+
+void coop_mark_need_initial_upload(void)
+{
+    s_need_initial_upload = 1;
+}
+
+static int is_real_map(enum map_e map)
+{
+    return (map > 0 && map <= 0x90);
+}
+
+static void coop_try_connect_if_ready(void)
+{
+    if (!s_need_connect)
+    {
+        return;
+    }
+
+    enum map_e current_map = map_get();
+    if (!is_real_map(current_map))
+    {
+        return;
+    }
+
+    {
+        char *skip = recomp_get_config_string("coop_skip_connect");
+        if (!skip || skip[0] == '1')
+        {
+            toast_info("Co-op: connect skipped (isolation)");
+            s_need_connect = 0;
+            return;
+        }
+    }
+
+    char *host = recomp_get_config_string("server_url");
+    char *username = recomp_get_config_string("username");
+    char *lobby_name = recomp_get_config_string("lobby_name");
+    char *password = recomp_get_config_string("lobby_password");
+
+    if (!host || !username || !lobby_name)
+    {
+        toast_error("Missing connection settings! Check config.");
+        s_need_connect = 0;
+        return;
+    }
+
+    if (host[0] == '\0' || username[0] == '\0')
+    {
+        toast_error("Empty server_url/username in config");
+        s_need_connect = 0;
+        return;
+    }
+
+    if (!password)
+    {
+        password = "";
+    }
+
+    toast_info("Co-op: connecting...");
+    native_connect_to_server(host, username, lobby_name, password);
+
+    s_need_connect = 0;
+}
+
+static void send_ability_progress_blob(void)
+{
+    extern void ability_getSizeAndPtr(s32 * sizeOut, void **ptrOut);
+    void *ptr = NULL;
+    s32 size = 0;
+    ability_getSizeAndPtr(&size, &ptr);
+
+    if (ptr != NULL && size > 0)
+    {
+        native_send_ability_progress(ptr, size);
+    }
+}
+
+static void send_honeycomb_score_blob(void)
+{
+    extern void honeycombscore_getSizeAndPtr(s32 * sizeOut, void **ptrOut);
+    void *ptr = NULL;
+    s32 size = 0;
+    honeycombscore_getSizeAndPtr(&size, &ptr);
+
+    if (ptr != NULL && size > 0)
+    {
+        native_send_honeycomb_score(ptr, size);
+    }
+}
+
+static void send_mumbo_score_blob(void)
+{
+    extern void mumboscore_getSizeAndPtr(s32 * sizeOut, void **ptrOut);
+    void *ptr = NULL;
+    s32 size = 0;
+    mumboscore_getSizeAndPtr(&size, &ptr);
+
+    if (ptr != NULL && size > 0)
+    {
+        native_send_mumbo_score(ptr, size);
+    }
+}
+
+RECOMP_HOOK("transitionToMap")
+void coop_on_transition_to_map(enum map_e map, s32 exit, s32 transition)
+{
+    (void)exit;
+    (void)transition;
+
+    if (COOP_DEBUG_LOGS)
+    {
+        recomp_printf("[COOP] hook: transitionToMap map=%d\n", (int)map);
+    }
+
+    if (s_need_initial_upload && coop_network_is_safe_now(map))
+    {
+        toast_info("Uploading save state...");
+        native_upload_initial_save_data();
+
+        {
+            u8 *ptr = NULL;
+            int size = 0;
+            fileProgressFlag_getSizeAndPtr(&size, &ptr);
+            if (ptr != NULL && size > 0)
+            {
+                native_send_file_progress_flags(ptr, size);
+            }
+        }
+
+        send_ability_progress_blob();
+        send_honeycomb_score_blob();
+        send_mumbo_score_blob();
+
+        s_need_initial_upload = 0;
+    }
+}
+
+RECOMP_HOOK_RETURN("ability_setLearned")
+void ability_setLearned_hook(enum ability_e ability, bool val)
+{
+    if (applying_remote_state())
+    {
+        return;
+    }
+
+    send_ability_progress_blob();
+}
+
+RECOMP_HOOK_RETURN("honeycombscore_set")
+void honeycombscore_set_hook(enum honeycomb_e indx, bool val)
+{
+    if (applying_remote_state())
+    {
+        return;
+    }
+
+    extern bool honeycombscore_get(enum honeycomb_e indx);
+    bool was_set = honeycombscore_get(indx);
+
+    send_honeycomb_score_blob();
+
+    if (!was_set && val)
+    {
+        enum map_e mapId = map_get();
+        float pos[3];
+        player_getPosition(pos);
+
+        s16 x = (s16)pos[0];
+        s16 y = (s16)pos[1];
+        s16 z = (s16)pos[2];
+        int xyPacked = (((int)(u16)y) << 16) | ((u16)x);
+        native_send_honeycomb_collected((int)mapId, (int)indx, xyPacked, (int)z);
+    }
+}
+
+RECOMP_HOOK_RETURN("mumboscore_set")
+void mumboscore_set_hook(enum mumbotoken_e indx, bool val)
+{
+    if (applying_remote_state())
+    {
+        return;
+    }
+
+    extern bool mumboscore_get(enum mumbotoken_e indx);
+    bool was_set = mumboscore_get(indx);
+
+    send_mumbo_score_blob();
+
+    if (!was_set && val)
+    {
+        enum map_e mapId = map_get();
+        float pos[3];
+        player_getPosition(pos);
+
+        s16 x = (s16)pos[0];
+        s16 y = (s16)pos[1];
+        s16 z = (s16)pos[2];
+        int xyPacked = (((int)(u16)y) << 16) | ((u16)x);
+        native_send_mumbo_token_collected((int)mapId, (int)indx, xyPacked, (int)z);
+    }
+}
 
 RECOMP_HOOK_RETURN("mainLoop")
 void mainLoop(void)
 {
+    static const int COOP_MAINLOOP_STAGE = 5;
+
+    static int s_mainloop_heartbeat = 0;
+    if (COOP_DEBUG_LOGS && ((s_mainloop_heartbeat++ % 60) == 0))
+    {
+        recomp_printf("[COOP] mainLoop: tick\n");
+    }
+
     toast_update();
 
-    native_update_network();
-
-    GameMessage msg;
-    int messagesProcessed = 0;
-    const int MAX_MESSAGES_PER_FRAME = 100;
-
-    while (messagesProcessed < MAX_MESSAGES_PER_FRAME && poll_queue_message(&msg))
+    if (COOP_MAINLOOP_STAGE >= 1)
     {
-        process_queue_message(&msg);
-        messagesProcessed++;
+        coop_try_connect_if_ready();
+    }
+
+    enum map_e current_map = map_get();
+    enum level_e current_level = level_get();
+
+    if (current_map != s_last_map)
+    {
+        s_last_map = current_map;
+        s_frames_in_current_map = 0;
+    }
+    else
+    {
+        s_frames_in_current_map++;
+    }
+
+    if (COOP_MAINLOOP_STAGE >= 4)
+    {
+        if (current_map > 0 && current_map <= 0x90 && current_level >= 0 && current_level <= 20)
+        {
+            const s32 MIN_FRAMES_BEFORE_NETWORK_HEAVY = 60;
+
+            if (s_frames_in_current_map >= MIN_FRAMES_BEFORE_NETWORK_HEAVY)
+            {
+                static int s_net_update_breadcrumb_throttle = 0;
+                if (COOP_DEBUG_LOGS && ((s_net_update_breadcrumb_throttle++ % 60) == 0))
+                {
+                    recomp_printf("[COOP] update: before native_update_network\n");
+                }
+
+                native_update_network();
+
+                if (COOP_DEBUG_LOGS && ((s_net_update_breadcrumb_throttle % 60) == 0))
+                {
+                    recomp_printf("[COOP] update: after native_update_network\n");
+                }
+            }
+        }
+    }
+
+    if (COOP_MAINLOOP_STAGE >= 3)
+    {
+        if (s_frames_in_current_map >= MIN_FRAMES_BEFORE_NETWORK)
+        {
+            puppet_send_local_state();
+        }
+
+        puppet_update_all();
+    }
+
+    if (COOP_MAINLOOP_STAGE >= 4)
+    {
+        const s32 MIN_FRAMES_BEFORE_NETWORK_HEAVY = 60;
+        if (s_frames_in_current_map < MIN_FRAMES_BEFORE_NETWORK_HEAVY)
+        {
+            return;
+        }
+
+        static GameMessage msg;
+        int messagesProcessed = 0;
+        const int MAX_MESSAGES_PER_FRAME = 100;
+
+        while (messagesProcessed < MAX_MESSAGES_PER_FRAME && poll_queue_message(&msg))
+        {
+            process_queue_message(&msg);
+            messagesProcessed++;
+        }
     }
 }
 
@@ -50,7 +361,8 @@ void on_init(void)
 {
     toast_init();
 
-    if(!bkrecomp_note_saving_enabled()) {
+    if (!bkrecomp_note_saving_enabled())
+    {
         toast_error("CO-OP MOD NOT LOADED - You must enable note saving in settings to use this mod.");
         return;
     }
@@ -68,12 +380,21 @@ void on_init(void)
         return;
     }
 
+    if (host[0] == '\0' || username[0] == '\0')
+    {
+        toast_error("Empty server_url/username in config");
+        return;
+    }
+
     if (!password)
     {
         password = "";
     }
 
-    native_connect_to_server(host, username, lobby_name, password);
+    toast_info("Co-op: connect deferred until after map load");
+    s_need_connect = 1;
+
+    (void)0;
 }
 
 RECOMP_HOOK_RETURN("jiggyscore_setCollected")
@@ -110,5 +431,62 @@ void on_dynamic_note_collected(enum map_e map_id, enum level_e level_id)
 
     int dynamic_count = bkrecomp_dynamic_note_collected_count(map_id);
     sync_add_note(map_id, level_id, TRUE, dynamic_count - 1);
-    native_sync_note(map_id, level_id, TRUE, dynamic_count - 1);
+    native_sync_note(map_id, level_id, TRUE, (dynamic_count - 1));
+}
+
+static const int JIGSAW_COSTS[9] = {1, 2, 5, 7, 8, 9, 10, 12, 15};
+
+RECOMP_HOOK_RETURN("fileProgressFlag_set")
+void fileProgressFlag_set_hook(enum file_progress_e flag, s32 value)
+{
+    if (applying_remote_state())
+    {
+        return;
+    }
+
+    enum map_e map = map_get();
+    if (!coop_network_is_safe_now(map))
+    {
+        return;
+    }
+
+    if (s_frames_in_current_map < 120)
+    {
+        return;
+    }
+
+    if (COOP_DEBUG_LOGS)
+    {
+        recomp_printf("[COOP] hook: fileProgressFlag_set flag=%d val=%d\n", (int)flag, (int)value);
+    }
+
+    static u32 s_last_file_progress_send = 0;
+    const u32 FILE_PROGRESS_THROTTLE_MS = 2000;
+
+    if (!applying_remote_state())
+    {
+        u32 now = GetClockMS();
+        if (now - s_last_file_progress_send >= FILE_PROGRESS_THROTTLE_MS)
+        {
+            s_last_file_progress_send = now;
+
+            u8 *ptr = NULL;
+            int size = 0;
+            fileProgressFlag_getSizeAndPtr(&size, &ptr);
+            if (ptr != NULL && size > 0)
+            {
+                native_send_file_progress_flags(ptr, size);
+            }
+        }
+    }
+
+    if (flag >= FILEPROG_31_MM_OPEN && flag <= FILEPROG_39_CCW_OPEN && value == TRUE)
+    {
+        if (!applying_remote_state())
+        {
+            int world_id = (flag - FILEPROG_31_MM_OPEN) + 1;
+            int jiggy_cost = JIGSAW_COSTS[world_id - 1];
+            native_send_level_opened(world_id, jiggy_cost);
+        }
+    }
 }

@@ -1,4 +1,4 @@
-#import "collection.h"
+#include "collection.h"
 #include "bkrecomp_api.h"
 
 static bool apply_remote_state = FALSE;
@@ -10,6 +10,11 @@ extern ActorMarker *func_8032B16C(enum jiggy_e jiggy_id);
 extern void marker_despawn(ActorMarker *marker);
 extern void chjiggy_hide(Actor *actor);
 extern Actor *marker_getActor(ActorMarker *marker);
+extern enum map_e map_get(void);
+extern enum level_e level_get(void);
+extern void transitionToMap(enum map_e map, s32 exit, s32 transition);
+extern s32 fileProgressFlag_get(enum file_progress_e flag);
+extern void fileProgressFlag_set(enum file_progress_e flag, s32 value);
 
 extern struct
 {
@@ -29,6 +34,18 @@ extern struct
 bool applying_remote_state()
 {
     return apply_remote_state;
+}
+
+void with_applying_remote_state(void (*fn)(void *ctx), void *ctx)
+{
+    if (!fn)
+    {
+        return;
+    }
+
+    apply_remote_state = TRUE;
+    fn(ctx);
+    apply_remote_state = FALSE;
 }
 
 void collect_jiggy(int jiggy_enum_id, int collected_value)
@@ -128,6 +145,8 @@ void collect_note(int map_id, int level_id, bool is_dynamic, int note_index)
     }
     apply_remote_state = FALSE;
 
+    item_adjustByDiffWithoutHud(ITEM_C_NOTE, 1);
+
     if (!is_dynamic)
     {
         for (s32 cube_idx = 0; cube_idx < sCubeList.cubeCnt; cube_idx++)
@@ -186,5 +205,31 @@ void collect_note(int map_id, int level_id, bool is_dynamic, int note_index)
                 }
             }
         }
+    }
+}
+
+void open_level(int world_id, int jiggy_cost)
+{
+    enum file_progress_e level_open_flag = FILEPROG_31_MM_OPEN + (world_id - 1);
+
+    if (fileProgressFlag_get(level_open_flag))
+    {
+        return;
+    }
+
+    apply_remote_state = TRUE;
+
+    fileProgressFlag_set(level_open_flag, TRUE);
+
+    item_adjustByDiffWithoutHud(ITEM_26_JIGGY_TOTAL, -jiggy_cost);
+
+    apply_remote_state = FALSE;
+
+    enum map_e current_map = map_get();
+    enum level_e current_level = level_get();
+
+    if (current_level == LEVEL_6_LAIR)
+    {
+        transitionToMap(current_map, -1, 0);
     }
 }
