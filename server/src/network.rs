@@ -623,6 +623,11 @@ impl NetworkServer {
         payload.extend_from_slice(&(if note.is_dynamic { 1i32 } else { 0i32 }).to_be_bytes());
         payload.extend_from_slice(&note.note_index.to_be_bytes());
 
+        info!(
+            "Broadcasting note: player_id={}, map={}, level={}, is_dynamic={}, note_index={}",
+            player_id, note.map_id, note.level_id, note.is_dynamic, note.note_index
+        );
+
         self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::NoteCollected, &payload)
             .await?;
 

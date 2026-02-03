@@ -16,6 +16,27 @@ fn read_i32_be(data: &[u8], offset: usize) -> Result<i32> {
     Ok(read_u32_be(data, offset)? as i32)
 }
 
+// Helper function to read little-endian i32
+fn read_i32_le(data: &[u8], offset: usize) -> Result<i32> {
+    if offset + 4 > data.len() {
+        return Err(anyhow!("Not enough data to read i32"));
+    }
+    Ok(i32::from_le_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ]))
+}
+
+// Helper function to read little-endian i16
+fn read_i16_le(data: &[u8], offset: usize) -> Result<i16> {
+    if offset + 2 > data.len() {
+        return Err(anyhow!("Not enough data to read i16"));
+    }
+    Ok(i16::from_le_bytes([data[offset], data[offset + 1]]))
+}
+
 // Helper function to write big-endian u32
 fn write_u32_be(buf: &mut Vec<u8>, value: u32) {
     buf.push((value >> 24) as u8);
@@ -105,9 +126,10 @@ impl JiggyPacket {
         if data.len() < 8 {
             return Err(anyhow!("Invalid JiggyPacket: expected 8 bytes"));
         }
+        // Client uses std::memcpy (little-endian)
         Ok(JiggyPacket {
-            jiggy_enum_id: read_i32_be(data, 0)?,
-            collected_value: read_i32_be(data, 4)?,
+            jiggy_enum_id: read_i32_le(data, 0)?,
+            collected_value: read_i32_le(data, 4)?,
         })
     }
 }
@@ -122,14 +144,15 @@ pub struct NotePacket {
 
 impl NotePacket {
     pub fn deserialize(data: &[u8]) -> Result<Self> {
-        if data.len() < 16 {
-            return Err(anyhow!("Invalid NotePacket: expected 16 bytes"));
+        if data.len() < 13 {
+            return Err(anyhow!("Invalid NotePacket: expected 13 bytes, got {}", data.len()));
         }
+        // Client sends: mapId(4 LE) + levelId(4 LE) + isDynamic(1) + noteIndex(4 LE)
         Ok(NotePacket {
-            map_id: read_i32_be(data, 0)?,
-            level_id: read_i32_be(data, 4)?,
-            is_dynamic: read_i32_be(data, 8)? != 0,
-            note_index: read_i32_be(data, 12)?,
+            map_id: i32::from_le_bytes([data[0], data[1], data[2], data[3]]),
+            level_id: i32::from_le_bytes([data[4], data[5], data[6], data[7]]),
+            is_dynamic: data[8] != 0,
+            note_index: i32::from_le_bytes([data[9], data[10], data[11], data[12]]),
         })
     }
 }
@@ -144,14 +167,15 @@ pub struct NotePacketPos {
 
 impl NotePacketPos {
     pub fn deserialize(data: &[u8]) -> Result<Self> {
-        if data.len() < 16 {
-            return Err(anyhow!("Invalid NotePacketPos: expected 16 bytes"));
+        if data.len() < 10 {
+            return Err(anyhow!("Invalid NotePacketPos: expected 10 bytes"));
         }
+        // Client sends: mapId(4 LE) + x(2 LE i16) + y(2 LE i16) + z(2 LE i16)
         Ok(NotePacketPos {
-            map_id: read_i32_be(data, 0)?,
-            x: read_i32_be(data, 4)?,
-            y: read_i32_be(data, 8)?,
-            z: read_i32_be(data, 12)?,
+            map_id: read_i32_le(data, 0)?,
+            x: read_i16_le(data, 4)? as i32,
+            y: read_i16_le(data, 6)? as i32,
+            z: read_i16_le(data, 8)? as i32,
         })
     }
 }
@@ -167,9 +191,10 @@ impl LevelOpenedPacket {
         if data.len() < 8 {
             return Err(anyhow!("Invalid LevelOpenedPacket: expected 8 bytes"));
         }
+        // Client uses std::memcpy (little-endian)
         Ok(LevelOpenedPacket {
-            world_id: read_i32_be(data, 0)?,
-            jiggy_cost: read_i32_be(data, 4)?,
+            world_id: read_i32_le(data, 0)?,
+            jiggy_cost: read_i32_le(data, 4)?,
         })
     }
 
@@ -265,12 +290,13 @@ impl HoneycombCollectedPacket {
                 "Invalid HoneycombCollectedPacket: expected 20 bytes"
             ));
         }
+        // Client uses std::memcpy (little-endian)
         Ok(HoneycombCollectedPacket {
-            map_id: read_i32_be(data, 0)?,
-            honeycomb_id: read_i32_be(data, 4)?,
-            x: read_i32_be(data, 8)?,
-            y: read_i32_be(data, 12)?,
-            z: read_i32_be(data, 16)?,
+            map_id: read_i32_le(data, 0)?,
+            honeycomb_id: read_i32_le(data, 4)?,
+            x: read_i32_le(data, 8)?,
+            y: read_i32_le(data, 12)?,
+            z: read_i32_le(data, 16)?,
         })
     }
 }
@@ -291,12 +317,13 @@ impl MumboTokenCollectedPacket {
                 "Invalid MumboTokenCollectedPacket: expected 20 bytes"
             ));
         }
+        // Client uses std::memcpy (little-endian)
         Ok(MumboTokenCollectedPacket {
-            map_id: read_i32_be(data, 0)?,
-            token_id: read_i32_be(data, 4)?,
-            x: read_i32_be(data, 8)?,
-            y: read_i32_be(data, 12)?,
-            z: read_i32_be(data, 16)?,
+            map_id: read_i32_le(data, 0)?,
+            token_id: read_i32_le(data, 4)?,
+            x: read_i32_le(data, 8)?,
+            y: read_i32_le(data, 12)?,
+            z: read_i32_le(data, 16)?,
         })
     }
 }
@@ -314,8 +341,9 @@ impl NoteSaveDataPacket {
                 "Invalid NoteSaveDataPacket: expected at least 4 bytes"
             ));
         }
+        // Client uses std::memcpy (little-endian)
         Ok(NoteSaveDataPacket {
-            level_index: read_i32_be(data, 0)?,
+            level_index: read_i32_le(data, 0)?,
             save_data: data[4..].to_vec(),
         })
     }

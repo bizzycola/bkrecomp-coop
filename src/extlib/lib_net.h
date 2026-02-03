@@ -49,12 +49,15 @@ private:
     uint32_t m_lastHandshakeTime;
     uint32_t m_lastPingTime;
     uint32_t m_lastPacketSentTime;
+    uint32_t m_reliableSeqCounter;
 
     std::queue<NetEvent> m_eventQueue;
     std::mutex m_queueMutex;
 
     bool PerformLazyInit();
     void SendRawPacket(PacketType type, const void* data, size_t size);
+    void SendReliablePacket(PacketType type, const void* data, size_t size);
+    bool IsReliableType(PacketType type);
     void SendPing();
     void HandlePlayerConnected(const uint8_t* data, int len);
     void HandlePlayerDisconnected(const uint8_t* data, int len);

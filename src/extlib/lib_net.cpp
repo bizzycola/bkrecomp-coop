@@ -11,7 +11,7 @@ const uint32_t PING_INTERVAL_MS = 10000;
 
 NetworkClient::NetworkClient()
     : m_udpSocket(INVALID_SOCKET), m_isConnected(false), m_needsInit(false),
-      m_lastHandshakeTime(0), m_lastPingTime(0), m_lastPacketSentTime(0)
+      m_lastHandshakeTime(0), m_lastPingTime(0), m_lastPacketSentTime(0), m_reliableSeqCounter(0)
 {
 #ifdef _WIN32
     WSADATA wsaData;
@@ -116,6 +116,54 @@ void NetworkClient::SendRawPacket(PacketType type, const void *data, size_t size
     }
 }
 
+bool NetworkClient::IsReliableType(PacketType type)
+{
+    return type == PacketType::JiggyCollected ||
+           type == PacketType::NoteCollected ||
+           type == PacketType::NoteCollectedPos ||
+           type == PacketType::NoteSaveData ||
+           type == PacketType::FileProgressFlags ||
+           type == PacketType::AbilityProgress ||
+           type == PacketType::HoneycombScore ||
+           type == PacketType::MumboScore ||
+           type == PacketType::HoneycombCollected ||
+           type == PacketType::MumboTokenCollected ||
+           type == PacketType::LevelOpened ||
+           type == PacketType::FullSyncRequest;
+}
+
+void NetworkClient::SendReliablePacket(PacketType type, const void *data, size_t size)
+{
+    if (m_udpSocket == INVALID_SOCKET)
+    {
+        return;
+    }
+
+    // Reliable packets have: [packet_type:1][seq:4][data:N]
+    uint32_t seq = m_reliableSeqCounter++;
+    std::vector<uint8_t> buffer(1 + 4 + size);
+    buffer[0] = static_cast<uint8_t>(type);
+    
+    // Write sequence number in little-endian
+    buffer[1] = (seq) & 0xFF;
+    buffer[2] = (seq >> 8) & 0xFF;
+    buffer[3] = (seq >> 16) & 0xFF;
+    buffer[4] = (seq >> 24) & 0xFF;
+
+    if (size > 0 && data != nullptr)
+    {
+        std::memcpy(&buffer[5], data, size);
+    }
+
+    int sent = sendto(m_udpSocket, (const char *)buffer.data(), (int)buffer.size(), 0,
+                      (struct sockaddr *)&m_serverAddr, sizeof(m_serverAddr));
+
+    if (sent >= 0)
+    {
+        m_lastPacketSentTime = GetClockMS();
+    }
+}
+
 void NetworkClient::SendPing()
 {
     SendRawPacket(PacketType::Ping, nullptr, 0);
@@ -197,6 +245,21 @@ void NetworkClient::Update()
             uint8_t type = buf[0];
             uint8_t *payload = &buf[1];
             int payload_len = len - 1;
+
+            // Strip reliable sequence prefix if this is a reliable packet type
+            if (IsReliableType(static_cast<PacketType>(type)) && payload_len >= 4)
+            {
+                // Extract sequence number
+                uint32_t seq;
+                std::memcpy(&seq, payload, 4);
+                
+                // Send ACK
+                SendRawPacket(PacketType::ReliableAck, &seq, 4);
+                
+                // Skip sequence bytes
+                payload += 4;
+                payload_len -= 4;
+            }
 
             if (!m_isConnected)
             {
@@ -371,6 +434,9 @@ void NetworkClient::HandleNoteCollected(const uint8_t *data, int len)
 
     int32_t note_index = ((int32_t)data[16] << 24) | ((int32_t)data[17] << 16) |
                          ((int32_t)data[18] << 8) | ((int32_t)data[19]);
+
+    printf("[CLIENT] Received NoteCollected broadcast: map=%d, level=%d, is_dynamic=%d, note_index=%d\n",
+           map_id, level_id, is_dynamic, note_index);
 
     EnqueueEvent(PacketType::NoteCollected, "", {map_id, level_id, is_dynamic, note_index}, player_id);
 }
@@ -677,17 +743,20 @@ void NetworkClient::SendJiggy(int jiggyEnumId, int collectedValue)
     uint8_t buffer[8];
     std::memcpy(&buffer[0], &jiggyEnumId, 4);
     std::memcpy(&buffer[4], &collectedValue, 4);
-    SendRawPacket(PacketType::JiggyCollected, buffer, 8);
+    SendReliablePacket(PacketType::JiggyCollected, buffer, 8);
 }
 
 void NetworkClient::SendNote(int mapId, int levelId, bool isDynamic, int noteIndex)
 {
+    printf("[CLIENT] SendNote: map=%d, level=%d, is_dynamic=%d, note_index=%d\n",
+           mapId, levelId, isDynamic, noteIndex);
+    
     uint8_t buffer[13];
     std::memcpy(&buffer[0], &mapId, 4);
     std::memcpy(&buffer[4], &levelId, 4);
     buffer[8] = isDynamic ? 1 : 0;
     std::memcpy(&buffer[9], &noteIndex, 4);
-    SendRawPacket(PacketType::NoteCollected, buffer, 13);
+    SendReliablePacket(PacketType::NoteCollected, buffer, 13);
 }
 
 void NetworkClient::SendNotePos(int mapId, int x, int y, int z)
@@ -700,7 +769,7 @@ void NetworkClient::SendNotePos(int mapId, int x, int y, int z)
     std::memcpy(&buffer[4], &x16, 2);
     std::memcpy(&buffer[6], &y16, 2);
     std::memcpy(&buffer[8], &z16, 2);
-    SendRawPacket(PacketType::NoteCollectedPos, buffer, 10);
+    SendReliablePacket(PacketType::NoteCollectedPos, buffer, 10);
 }
 
 void NetworkClient::SendNoteSaveData(int levelIndex, const std::vector<uint8_t> &saveData)
@@ -712,7 +781,7 @@ void NetworkClient::SendNoteSaveData(int levelIndex, const std::vector<uint8_t> 
     {
         std::memcpy(&buffer[4], saveData.data(), saveData.size());
     }
-    SendRawPacket(PacketType::NoteSaveData, buffer.data(), buffer.size());
+    SendReliablePacket(PacketType::NoteSaveData, buffer.data(), buffer.size());
 }
 
 void NetworkClient::SendLevelOpened(int worldId, int jiggyCost)
@@ -720,7 +789,7 @@ void NetworkClient::SendLevelOpened(int worldId, int jiggyCost)
     uint8_t buffer[8];
     std::memcpy(&buffer[0], &worldId, 4);
     std::memcpy(&buffer[4], &jiggyCost, 4);
-    SendRawPacket(PacketType::LevelOpened, buffer, 8);
+    SendReliablePacket(PacketType::LevelOpened, buffer, 8);
 }
 
 void NetworkClient::SendPuppetUpdate(const PuppetUpdatePacket &pak)
@@ -765,14 +834,14 @@ void NetworkClient::SendPuppetUpdate(const PuppetUpdatePacket &pak)
 
 void NetworkClient::RequestFullSync()
 {
-    SendRawPacket(PacketType::FullSyncRequest, nullptr, 0);
+    SendReliablePacket(PacketType::FullSyncRequest, nullptr, 0);
 }
 
 void NetworkClient::SendFileProgressFlags(const std::vector<uint8_t> &flags)
 {
     if (!flags.empty())
     {
-        SendRawPacket(PacketType::FileProgressFlags, flags.data(), flags.size());
+        SendReliablePacket(PacketType::FileProgressFlags, flags.data(), flags.size());
     }
 }
 
@@ -780,7 +849,7 @@ void NetworkClient::SendAbilityProgress(const std::vector<uint8_t> &bytes)
 {
     if (!bytes.empty())
     {
-        SendRawPacket(PacketType::AbilityProgress, bytes.data(), bytes.size());
+        SendReliablePacket(PacketType::AbilityProgress, bytes.data(), bytes.size());
     }
 }
 
@@ -788,7 +857,7 @@ void NetworkClient::SendHoneycombScore(const std::vector<uint8_t> &bytes)
 {
     if (!bytes.empty())
     {
-        SendRawPacket(PacketType::HoneycombScore, bytes.data(), bytes.size());
+        SendReliablePacket(PacketType::HoneycombScore, bytes.data(), bytes.size());
     }
 }
 
@@ -796,7 +865,7 @@ void NetworkClient::SendMumboScore(const std::vector<uint8_t> &bytes)
 {
     if (!bytes.empty())
     {
-        SendRawPacket(PacketType::MumboScore, bytes.data(), bytes.size());
+        SendReliablePacket(PacketType::MumboScore, bytes.data(), bytes.size());
     }
 }
 
@@ -808,7 +877,7 @@ void NetworkClient::SendHoneycombCollected(int mapId, int honeycombId, int x, in
     std::memcpy(&buffer[8], &x, 4);
     std::memcpy(&buffer[12], &y, 4);
     std::memcpy(&buffer[16], &z, 4);
-    SendRawPacket(PacketType::HoneycombCollected, buffer, 20);
+    SendReliablePacket(PacketType::HoneycombCollected, buffer, 20);
 }
 
 void NetworkClient::SendMumboTokenCollected(int mapId, int tokenId, int x, int y, int z)
@@ -819,7 +888,7 @@ void NetworkClient::SendMumboTokenCollected(int mapId, int tokenId, int x, int y
     std::memcpy(&buffer[8], &x, 4);
     std::memcpy(&buffer[12], &y, 4);
     std::memcpy(&buffer[16], &z, 4);
-    SendRawPacket(PacketType::MumboTokenCollected, buffer, 20);
+    SendReliablePacket(PacketType::MumboTokenCollected, buffer, 20);
 }
 
 void NetworkClient::UploadInitialSaveData()

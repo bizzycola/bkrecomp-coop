@@ -412,11 +412,15 @@ void jiggyscore_setCollected_hook(int jiggy_enum_id, int collected_value)
 RECOMP_CALLBACK("*", bkrecomp_note_collected_event)
 void on_note_collected(enum map_e map_id, enum level_e level_id, u8 note_index)
 {
+    recomp_printf("[COOP] on_note_collected: map=%d, level=%d, note_index=%d\n", map_id, level_id, note_index);
+    
     if (applying_remote_state())
     {
+        recomp_printf("[COOP] on_note_collected: skipping (applying_remote_state=TRUE)\n");
         return;
     }
 
+    recomp_printf("[COOP] on_note_collected: syncing note\n");
     sync_add_note(map_id, level_id, FALSE, note_index);
     native_sync_note(map_id, level_id, FALSE, note_index);
 }
@@ -424,12 +428,17 @@ void on_note_collected(enum map_e map_id, enum level_e level_id, u8 note_index)
 RECOMP_CALLBACK("*", bkrecomp_dynamic_note_collected_event)
 void on_dynamic_note_collected(enum map_e map_id, enum level_e level_id)
 {
+    recomp_printf("[COOP] on_dynamic_note_collected: map=%d, level=%d\n", map_id, level_id);
+    
     if (applying_remote_state())
     {
+        recomp_printf("[COOP] on_dynamic_note_collected: skipping (applying_remote_state=TRUE)\n");
         return;
     }
 
     int dynamic_count = bkrecomp_dynamic_note_collected_count(map_id);
+    recomp_printf("[COOP] on_dynamic_note_collected: syncing dynamic note (count=%d, index=%d)\n", 
+                  dynamic_count, dynamic_count - 1);
     sync_add_note(map_id, level_id, TRUE, dynamic_count - 1);
     native_sync_note(map_id, level_id, TRUE, (dynamic_count - 1));
 }

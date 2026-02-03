@@ -124,23 +124,32 @@ typedef struct
 
 void collect_note(int map_id, int level_id, bool is_dynamic, int note_index)
 {
+    recomp_printf("[COLLECTION] collect_note called: map=%d, level=%d, is_dynamic=%d, note_index=%d\n",
+           map_id, level_id, is_dynamic, note_index);
+
     if (!bkrecomp_note_saving_active())
     {
+        recomp_printf("[COLLECTION] Note saving not active, returning\n");
         return;
     }
 
     if (bkrecomp_is_note_collected(map_id, level_id, note_index))
     {
+        recomp_printf("[COLLECTION] Note already collected, returning\n");
         return;
     }
 
+    recomp_printf("[COLLECTION] Collecting note with apply_remote_state=TRUE\n");
     apply_remote_state = TRUE;
     if (is_dynamic)
     {
+        recomp_printf("[COLLECTION] Calling bkrecomp_collect_dynamic_note(map=%d, level=%d)\n", map_id, level_id);
         bkrecomp_collect_dynamic_note(map_id, level_id);
+        recomp_printf("[COLLECTION] Dynamic note collection complete\n");
     }
     else
     {
+        recomp_printf("[COLLECTION] Calling bkrecomp_set_note_collected for static note\n");
         bkrecomp_set_note_collected(map_id, level_id, note_index);
     }
     apply_remote_state = FALSE;
@@ -149,6 +158,7 @@ void collect_note(int map_id, int level_id, bool is_dynamic, int note_index)
 
     if (!is_dynamic)
     {
+        recomp_printf("[COLLECTION] Searching for note prop to despawn (note_index=%d)\n", note_index);
         for (s32 cube_idx = 0; cube_idx < sCubeList.cubeCnt; cube_idx++)
         {
             Cube *cube = &sCubeList.cubes[cube_idx];
@@ -171,6 +181,7 @@ void collect_note(int map_id, int level_id, bool is_dynamic, int note_index)
 
                 if (note_data != NULL && note_data->note_index == note_index)
                 {
+                    recomp_printf("[COLLECTION] Found note prop in main cubes, despawning\n");
                     prop->spriteProp.unk8_4 = FALSE;
                     return;
                 }
@@ -200,6 +211,7 @@ void collect_note(int map_id, int level_id, bool is_dynamic, int note_index)
 
                 if (note_data != NULL && note_data->note_index == note_index)
                 {
+                    recomp_printf("[COLLECTION] Found note prop in fallback cubes, despawning\n");
                     prop->spriteProp.unk8_4 = FALSE;
                     return;
                 }

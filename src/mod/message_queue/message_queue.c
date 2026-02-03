@@ -278,10 +278,18 @@ void process_queue_message(const GameMessage *msg)
         int isDynamic = (msg->param3 != 0);
         int noteIndex = msg->param4;
 
+        recomp_printf("[MSG_QUEUE] Processing NOTE_COLLECTED: map=%d, level=%d, is_dynamic=%d, note_index=%d\n",
+               mapId, levelId, isDynamic, noteIndex);
+
         if (!sync_is_note_collected(mapId, levelId, isDynamic, noteIndex))
         {
+            recomp_printf("[MSG_QUEUE] Note not yet collected locally, adding and collecting\n");
             sync_add_note(mapId, levelId, isDynamic, noteIndex);
             collect_note(mapId, levelId, isDynamic, noteIndex);
+        }
+        else
+        {
+            recomp_printf("[MSG_QUEUE] Note already collected locally, skipping\n");
         }
         break;
     }
