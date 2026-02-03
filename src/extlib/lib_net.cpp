@@ -371,30 +371,107 @@ void NetworkClient::HandleNoteSaveData(const uint8_t *data, int len)
 
 void NetworkClient::HandlePuppetUpdate(const uint8_t *data, int len)
 {
-    if (len < 4)
+    // Expected format (after player_id):
+    // 8 floats (32 bytes): x, y, z, yaw, pitch, roll, anim_duration, anim_timer
+    // 2 bytes: level_id (int16, big-endian)
+    // 2 bytes: map_id (int16, big-endian)
+    // 2 bytes: anim_id (int16, big-endian)
+    // 4 bytes: model_id, flags, playback_type, playback_direction (uint8s)
+    const int EXPECTED_LEN = 32 + 2 + 2 + 2 + 4; // 42 bytes
+    
+    if (len < EXPECTED_LEN)
     {
         return;
     }
 
-    try
+    uint32_t player_id;
+    std::memcpy(&player_id, data, 4);
+    data += 4;
+
+    // Read 8 floats (x, y, z, yaw, pitch, roll, anim_duration, anim_timer)
+    float x, y, z, yaw, pitch, roll, anim_duration, anim_timer;
+    
+    auto read_float = [&data]() -> float {
+        uint32_t bits = ((uint32_t)data[0] << 24) | 
+                        ((uint32_t)data[1] << 16) | 
+                        ((uint32_t)data[2] << 8) | 
+                        ((uint32_t)data[3]);
+        data += 4;
+        float result;
+        std::memcpy(&result, &bits, sizeof(float));
+        return result;
+    };
+
+    x = read_float();
+    y = read_float();
+    z = read_float();
+    yaw = read_float();
+    pitch = read_float();
+    roll = read_float();
+    anim_duration = read_float();
+    anim_timer = read_float();
+
+    // Read int16s (big-endian)
+    int16_t level_id = (int16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
+    data += 2;
+    int16_t map_id = (int16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
+    data += 2;
+    int16_t anim_id = (int16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
+    data += 2;
+
+    // Read uint8s
+    uint8_t model_id = data[0];
+    uint8_t flags = data[1];
+    uint8_t playback_type = data[2];
+    uint8_t playback_direction = data[3];
+
+    // Pack data for the message queue
+    // The mod expects:
+    // paramF1-F3: x, y, z
+    // param1-3: yaw, pitch, roll (as float bits in int32)
+    // paramF4-F5: anim_duration, anim_timer
+    // param4: map_id (low 8 bits), level_id (next 8 bits), anim_id (high 16 bits)
+    // param5: playback_type
+    // param6: playback_direction
+
+    std::vector<int32_t> payload;
+    
+    // Convert floats to int32 for storage in payload (reinterpret as bits)
+    int32_t yaw_bits, pitch_bits, roll_bits;
+    std::memcpy(&yaw_bits, &yaw, sizeof(float));
+    std::memcpy(&pitch_bits, &pitch, sizeof(float));
+    std::memcpy(&roll_bits, &roll, sizeof(float));
+    
+    payload.push_back(yaw_bits);   // param1
+    payload.push_back(pitch_bits); // param2
+    payload.push_back(roll_bits);  // param3
+    
+    // Pack map_id, level_id, anim_id into param4
+    uint32_t packed = ((uint32_t)(uint16_t)anim_id << 16) | 
+                      ((uint32_t)(uint8_t)level_id << 8) | 
+                      ((uint32_t)(uint8_t)map_id);
+    payload.push_back((int32_t)packed); // param4
+    
+    payload.push_back((int32_t)playback_type);     // param5
+    payload.push_back((int32_t)playback_direction); // param6
+
+    // Create NetEvent with the puppet data
+    NetEvent e;
+    e.type = PacketType::PuppetUpdate;
+    e.playerId = (int)player_id;
+    e.intData = payload;
+    
+    // Store x, y, z as text data (hacky but we need to pass them somehow)
+    // Actually, let's use a different approach - store them in first 3 float params
+    e.floatData.push_back(x);
+    e.floatData.push_back(y);
+    e.floatData.push_back(z);
+    e.floatData.push_back(anim_duration);
+    e.floatData.push_back(anim_timer);
+
     {
-        uint32_t player_id;
-        std::memcpy(&player_id, data, 4);
-        msgpack::object_handle oh = msgpack::unpack((const char *)(data + 4), len - 4);
-        msgpack::object obj = oh.get();
-
-        PuppetUpdatePacket p;
-        obj.convert(p);
-
-        std::vector<int32_t> payload;
-        payload.push_back((int32_t)p.x);
-        payload.push_back((int32_t)p.y);
-        payload.push_back((int32_t)p.z);
-
-        EnqueueEvent(PacketType::PuppetUpdate, "", payload, player_id);
-    }
-    catch (...)
-    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_eventQueue.push(e);
     }
 }
 

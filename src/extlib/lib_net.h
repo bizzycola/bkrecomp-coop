@@ -31,6 +31,7 @@ struct NetEvent {
     int playerId;
     std::string textData;
     std::vector<int32_t> intData;
+    std::vector<float> floatData;
 };
 
 class NetworkClient {

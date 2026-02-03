@@ -467,6 +467,21 @@ RECOMP_DLL_FUNC(native_update_network)
                 msg.param3 = evt.intData[2];
             if (evt.intData.size() > 3)
                 msg.param4 = evt.intData[3];
+            if (evt.intData.size() > 4)
+                msg.param5 = evt.intData[4];
+            if (evt.intData.size() > 5)
+                msg.param6 = evt.intData[5];
+
+            if (evt.floatData.size() > 0)
+                msg.paramF1 = evt.floatData[0];
+            if (evt.floatData.size() > 1)
+                msg.paramF2 = evt.floatData[1];
+            if (evt.floatData.size() > 2)
+                msg.paramF3 = evt.floatData[2];
+            if (evt.floatData.size() > 3)
+                msg.paramF4 = evt.floatData[3];
+            if (evt.floatData.size() > 4)
+                msg.paramF5 = evt.floatData[4];
 
             g_messageQueue.Push(msg);
         }
