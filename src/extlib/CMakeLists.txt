@@ -1,9 +1,3 @@
-# Add msgpack
-target_include_directories(${TARGET_NAME} PUBLIC 
-    "msgpack-c/include"
-)
-
-
 target_sources(${TARGET_NAME} PRIVATE
     "lib_net.cpp"
     "lib_main.cpp"

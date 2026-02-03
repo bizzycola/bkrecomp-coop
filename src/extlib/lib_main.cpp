@@ -530,7 +530,6 @@ extern "C" DLLEXPORT int native_get_note_save_data(int levelIndex, unsigned char
 
 RECOMP_DLL_FUNC(native_sync_note)
 {
-    coop_dll_log("[native_sync_note] start");
     int mapId = RECOMP_ARG(int, 0);
     int levelId = RECOMP_ARG(int, 1);
     bool isDynamic = RECOMP_ARG(bool, 2);
@@ -538,11 +537,9 @@ RECOMP_DLL_FUNC(native_sync_note)
 
     if (g_networkClient != nullptr)
     {
-        coop_dll_log("[native_sync_note] sending");
         g_networkClient->SendNote(mapId, levelId, isDynamic, noteIndex);
     }
 
-    coop_dll_log("[native_sync_note] done");
     RECOMP_RETURN(int, 1);
 }
 

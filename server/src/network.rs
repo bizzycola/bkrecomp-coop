@@ -278,7 +278,7 @@ impl NetworkServer {
     }
 
     async fn handle_handshake(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let login: LoginPacket = rmp_serde::from_slice(payload)?;
+        let login = LoginPacket::deserialize(payload)?;
 
         info!(
             "Handshake received from {} - User: {}, Lobby: {}",
@@ -350,7 +350,7 @@ impl NetworkServer {
     }
 
     async fn handle_jiggy_collected(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let jiggy: JiggyPacket = rmp_serde::from_slice(payload)?;
+        let jiggy = JiggyPacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -358,9 +358,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let (lobby_name, username) = {
+        let (lobby_name, username, player_id) = {
             let p = player_arc.read().await;
-            (p.lobby_name.clone(), p.username.clone())
+            (p.lobby_name.clone(), p.username.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
@@ -375,17 +375,17 @@ impl NetworkServer {
         };
 
         if added {
-            let broadcast = BroadcastJiggy {
-                jiggy_enum_id: jiggy.jiggy_enum_id,
-                collected_value: jiggy.collected_value,
-                collector: username,
-            };
+            // Manually serialize broadcast
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&player_id.to_be_bytes());
+            payload.extend_from_slice(&jiggy.jiggy_enum_id.to_be_bytes());
+            payload.extend_from_slice(&jiggy.collected_value.to_be_bytes());
 
             self.broadcast_to_lobby_except(
                 &lobby_name,
                 addr,
                 PacketType::JiggyCollected,
-                &broadcast,
+                &payload,
             )
             .await?;
         }
@@ -394,7 +394,7 @@ impl NetworkServer {
     }
 
     async fn handle_honeycomb_collected(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let hc: HoneycombCollectedPacket = rmp_serde::from_slice(payload)?;
+        let hc = HoneycombCollectedPacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -402,9 +402,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let (lobby_name, username) = {
+        let (lobby_name, username, player_id) = {
             let p = player_arc.read().await;
-            (p.lobby_name.clone(), p.username.clone())
+            (p.lobby_name.clone(), p.username.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
@@ -426,20 +426,20 @@ impl NetworkServer {
         };
 
         if added {
-            let broadcast = BroadcastHoneycombCollected {
-                map_id: hc.map_id,
-                honeycomb_id: hc.honeycomb_id,
-                x: hc.x,
-                y: hc.y,
-                z: hc.z,
-                collector: username,
-            };
+            // Manually serialize the broadcast with player_id
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&player_id.to_be_bytes());
+            payload.extend_from_slice(&hc.map_id.to_be_bytes());
+            payload.extend_from_slice(&hc.honeycomb_id.to_be_bytes());
+            payload.extend_from_slice(&hc.x.to_be_bytes());
+            payload.extend_from_slice(&hc.y.to_be_bytes());
+            payload.extend_from_slice(&hc.z.to_be_bytes());
 
             self.broadcast_to_lobby_except(
                 &lobby_name,
                 addr,
                 PacketType::HoneycombCollected,
-                &broadcast,
+                &payload,
             )
             .await?;
         }
@@ -448,7 +448,7 @@ impl NetworkServer {
     }
 
     async fn handle_mumbo_token_collected(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let tok: MumboTokenCollectedPacket = rmp_serde::from_slice(payload)?;
+        let tok = MumboTokenCollectedPacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -456,9 +456,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let (lobby_name, username) = {
+        let (lobby_name, username, player_id) = {
             let p = player_arc.read().await;
-            (p.lobby_name.clone(), p.username.clone())
+            (p.lobby_name.clone(), p.username.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
@@ -480,20 +480,20 @@ impl NetworkServer {
         };
 
         if added {
-            let broadcast = BroadcastMumboTokenCollected {
-                map_id: tok.map_id,
-                token_id: tok.token_id,
-                x: tok.x,
-                y: tok.y,
-                z: tok.z,
-                collector: username,
-            };
+            // Manually serialize broadcast
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&player_id.to_be_bytes());
+            payload.extend_from_slice(&tok.map_id.to_be_bytes());
+            payload.extend_from_slice(&tok.token_id.to_be_bytes());
+            payload.extend_from_slice(&tok.x.to_be_bytes());
+            payload.extend_from_slice(&tok.y.to_be_bytes());
+            payload.extend_from_slice(&tok.z.to_be_bytes());
 
             self.broadcast_to_lobby_except(
                 &lobby_name,
                 addr,
                 PacketType::MumboTokenCollected,
-                &broadcast,
+                &payload,
             )
             .await?;
         }
@@ -502,7 +502,7 @@ impl NetworkServer {
     }
 
     async fn handle_level_opened(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let level: LevelOpenedPacket = rmp_serde::from_slice(payload)?;
+        let level = LevelOpenedPacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -510,9 +510,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let (lobby_name, username) = {
+        let (lobby_name, username, player_id) = {
             let p = player_arc.read().await;
-            (p.lobby_name.clone(), p.username.clone())
+            (p.lobby_name.clone(), p.username.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
@@ -532,7 +532,13 @@ impl NetworkServer {
                 level.world_id, level.jiggy_cost, username, lobby_name
             );
 
-            self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::LevelOpened, &level)
+            // Manually serialize broadcast
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&player_id.to_be_bytes());
+            payload.extend_from_slice(&level.world_id.to_be_bytes());
+            payload.extend_from_slice(&level.jiggy_cost.to_be_bytes());
+
+            self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::LevelOpened, &payload)
                 .await?;
         }
 
@@ -540,7 +546,7 @@ impl NetworkServer {
     }
 
     async fn handle_note_collected_pos(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let note: NotePacketPos = rmp_serde::from_slice(payload)?;
+        let note = NotePacketPos::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -548,9 +554,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let (lobby_name, username) = {
+        let (lobby_name, username, player_id) = {
             let p = player_arc.read().await;
-            (p.lobby_name.clone(), p.username.clone())
+            (p.lobby_name.clone(), p.username.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
@@ -561,7 +567,7 @@ impl NetworkServer {
         let lobby_arc = lobby.unwrap();
         let added = {
             let mut l = lobby_arc.write().await;
-            l.add_collected_note(note.map_id, note.x, note.y, note.z, username.clone())
+            l.add_collected_note(note.map_id, note.x as i16, note.y as i16, note.z as i16, username.clone())
         };
 
         if added {
@@ -570,19 +576,19 @@ impl NetworkServer {
                 note.map_id, note.x, note.y, note.z, username, lobby_name
             );
 
-            let broadcast = BroadcastNotePos {
-                map_id: note.map_id,
-                x: note.x,
-                y: note.y,
-                z: note.z,
-                collector: username,
-            };
+            // Manually serialize broadcast
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&player_id.to_be_bytes());
+            payload.extend_from_slice(&note.map_id.to_be_bytes());
+            payload.extend_from_slice(&note.x.to_be_bytes());
+            payload.extend_from_slice(&note.y.to_be_bytes());
+            payload.extend_from_slice(&note.z.to_be_bytes());
 
             self.broadcast_to_lobby_except(
                 &lobby_name,
                 addr,
                 PacketType::NoteCollectedPos,
-                &broadcast,
+                &payload,
             )
             .await?;
         }
@@ -591,7 +597,7 @@ impl NetworkServer {
     }
 
     async fn handle_note_collected(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let note: NotePacket = rmp_serde::from_slice(payload)?;
+        let note = NotePacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -599,9 +605,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let (lobby_name, username) = {
+        let (lobby_name, username, player_id) = {
             let p = player_arc.read().await;
-            (p.lobby_name.clone(), p.username.clone())
+            (p.lobby_name.clone(), p.username.clone(), p.id)
         };
 
         info!(
@@ -609,22 +615,22 @@ impl NetworkServer {
             note.map_id, note.note_index, username, lobby_name
         );
 
-        let broadcast = BroadcastNote {
-            map_id: note.map_id,
-            level_id: note.level_id,
-            is_dynamic: note.is_dynamic,
-            note_index: note.note_index,
-            collector: username,
-        };
+        // Manually serialize broadcast
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&player_id.to_be_bytes());
+        payload.extend_from_slice(&note.map_id.to_be_bytes());
+        payload.extend_from_slice(&note.level_id.to_be_bytes());
+        payload.extend_from_slice(&(if note.is_dynamic { 1i32 } else { 0i32 }).to_be_bytes());
+        payload.extend_from_slice(&note.note_index.to_be_bytes());
 
-        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::NoteCollected, &broadcast)
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::NoteCollected, &payload)
             .await?;
 
         Ok(())
     }
 
     async fn handle_note_save_data(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let data: NoteSaveDataPacket = rmp_serde::from_slice(payload)?;
+        let data = NoteSaveDataPacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -654,7 +660,7 @@ impl NetworkServer {
     }
 
     async fn handle_file_progress_flags(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let data: FileProgressFlagsPacket = rmp_serde::from_slice(payload)?;
+        let data = FileProgressFlagsPacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -662,9 +668,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let lobby_name = {
+        let (lobby_name, player_id) = {
             let p = player_arc.read().await;
-            p.lobby_name.clone()
+            (p.lobby_name.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
@@ -676,14 +682,19 @@ impl NetworkServer {
             }
         }
 
-        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::FileProgressFlags, &data)
+        // Manually serialize: player_id + raw bytes
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&player_id.to_be_bytes());
+        payload.extend_from_slice(&data.flags);
+
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::FileProgressFlags, &payload)
             .await?;
 
         Ok(())
     }
 
     async fn handle_ability_progress(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let data: AbilityProgressPacket = rmp_serde::from_slice(payload)?;
+        let data = AbilityProgressPacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -691,27 +702,30 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let lobby_name = {
+        let (lobby_name, player_id) = {
             let p = player_arc.read().await;
-            p.lobby_name.clone()
+            (p.lobby_name.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
         if let Some(lobby_arc) = lobby {
             let mut l = lobby_arc.write().await;
-            if l.update_ability_progress(&data.bytes) {
-                l.has_initial_save_data = true;
-            }
+            l.update_ability_progress(&data.bytes);
         }
 
-        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::AbilityProgress, &data)
+        // Manually serialize: player_id + raw bytes
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&player_id.to_be_bytes());
+        payload.extend_from_slice(&data.bytes);
+
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::AbilityProgress, &payload)
             .await?;
 
         Ok(())
     }
 
     async fn handle_honeycomb_score(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let data: HoneycombScorePacket = rmp_serde::from_slice(payload)?;
+        let data = HoneycombScorePacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -719,9 +733,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let lobby_name = {
+        let (lobby_name, player_id) = {
             let p = player_arc.read().await;
-            p.lobby_name.clone()
+            (p.lobby_name.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
@@ -732,14 +746,19 @@ impl NetworkServer {
             }
         }
 
-        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::HoneycombScore, &data)
+        // Manually serialize: player_id + raw bytes
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&player_id.to_be_bytes());
+        payload.extend_from_slice(&data.bytes);
+
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::HoneycombScore, &payload)
             .await?;
 
         Ok(())
     }
 
     async fn handle_mumbo_score(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
-        let data: MumboScorePacket = rmp_serde::from_slice(payload)?;
+        let data = MumboScorePacket::deserialize(payload)?;
 
         let player = self.state.get_player_by_addr(&addr);
         if player.is_none() {
@@ -747,9 +766,9 @@ impl NetworkServer {
         }
 
         let player_arc = player.unwrap();
-        let lobby_name = {
+        let (lobby_name, player_id) = {
             let p = player_arc.read().await;
-            p.lobby_name.clone()
+            (p.lobby_name.clone(), p.id)
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
@@ -760,7 +779,12 @@ impl NetworkServer {
             }
         }
 
-        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::MumboScore, &data)
+        // Manually serialize: player_id + raw bytes
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&player_id.to_be_bytes());
+        payload.extend_from_slice(&data.bytes);
+
+        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::MumboScore, &payload)
             .await?;
 
         Ok(())
@@ -885,32 +909,37 @@ impl NetworkServer {
                 level_index: level_index as i32,
                 save_data: save_data.clone(),
             };
-            self.send_packet_serialized(PacketType::NoteSaveData, &packet, addr)
+            let payload = packet.serialize();
+            self.send_packet_serialized(PacketType::NoteSaveData, &payload, addr)
                 .await?;
         }
 
         let fp = FileProgressFlagsPacket {
             flags: l.save_flags.file_progress_flags.clone(),
         };
-        self.send_packet_serialized(PacketType::FileProgressFlags, &fp, addr)
+        let fp_payload = fp.serialize();
+        self.send_packet_serialized(PacketType::FileProgressFlags, &fp_payload, addr)
             .await?;
 
         let ap = AbilityProgressPacket {
             bytes: l.save_flags.ability_progress.clone(),
         };
-        self.send_packet_serialized(PacketType::AbilityProgress, &ap, addr)
+        let ap_payload = ap.serialize();
+        self.send_packet_serialized(PacketType::AbilityProgress, &ap_payload, addr)
             .await?;
 
         let hc = HoneycombScorePacket {
             bytes: l.save_flags.honeycomb_score.clone(),
         };
-        self.send_packet_serialized(PacketType::HoneycombScore, &hc, addr)
+        let hc_payload = hc.serialize();
+        self.send_packet_serialized(PacketType::HoneycombScore, &hc_payload, addr)
             .await?;
 
         let ms = MumboScorePacket {
             bytes: l.save_flags.mumbo_score.clone(),
         };
-        self.send_packet_serialized(PacketType::MumboScore, &ms, addr)
+        let ms_payload = ms.serialize();
+        self.send_packet_serialized(PacketType::MumboScore, &ms_payload, addr)
             .await?;
 
         for jiggy in &l.collected_jiggies {
@@ -919,33 +948,35 @@ impl NetworkServer {
                 collected_value: jiggy.jiggy_id,
                 collector: jiggy.collected_by.clone(),
             };
-            self.send_packet_serialized(PacketType::JiggyCollected, &broadcast, addr)
+            // Use dummy player_id 0 for historical data
+            let jiggy_payload = broadcast.serialize(0);
+            self.send_packet_serialized(PacketType::JiggyCollected, &jiggy_payload, addr)
                 .await?;
         }
 
         for hc in &l.collected_honeycombs {
-            let broadcast = BroadcastHoneycombCollected {
-                map_id: hc.map_id,
-                honeycomb_id: hc.honeycomb_id,
-                x: hc.x,
-                y: hc.y,
-                z: hc.z,
-                collector: hc.collected_by.clone(),
-            };
-            self.send_packet_serialized(PacketType::HoneycombCollected, &broadcast, addr)
+            // Manual serialization: player_id (dummy 0) + map_id + honeycomb_id + x + y + z
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&0u32.to_be_bytes()); // dummy player_id
+            payload.extend_from_slice(&hc.map_id.to_be_bytes());
+            payload.extend_from_slice(&hc.honeycomb_id.to_be_bytes());
+            payload.extend_from_slice(&hc.x.to_be_bytes());
+            payload.extend_from_slice(&hc.y.to_be_bytes());
+            payload.extend_from_slice(&hc.z.to_be_bytes());
+            self.send_packet_serialized(PacketType::HoneycombCollected, &payload, addr)
                 .await?;
         }
 
         for tok in &l.collected_mumbo_tokens {
-            let broadcast = BroadcastMumboTokenCollected {
-                map_id: tok.map_id,
-                token_id: tok.token_id,
-                x: tok.x,
-                y: tok.y,
-                z: tok.z,
-                collector: tok.collected_by.clone(),
-            };
-            self.send_packet_serialized(PacketType::MumboTokenCollected, &broadcast, addr)
+            // Manual serialization: player_id (dummy 0) + map_id + token_id + x + y + z
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&0u32.to_be_bytes()); // dummy player_id
+            payload.extend_from_slice(&tok.map_id.to_be_bytes());
+            payload.extend_from_slice(&tok.token_id.to_be_bytes());
+            payload.extend_from_slice(&tok.x.to_be_bytes());
+            payload.extend_from_slice(&tok.y.to_be_bytes());
+            payload.extend_from_slice(&tok.z.to_be_bytes());
+            self.send_packet_serialized(PacketType::MumboTokenCollected, &payload, addr)
                 .await?;
         }
 
@@ -954,7 +985,8 @@ impl NetworkServer {
                 world_id: opened.world_id,
                 jiggy_cost: opened.jiggy_cost,
             };
-            self.send_packet_serialized(PacketType::LevelOpened, &packet, addr)
+            let payload = packet.serialize();
+            self.send_packet_serialized(PacketType::LevelOpened, &payload, addr)
                 .await?;
         }
 
@@ -982,28 +1014,29 @@ impl NetworkServer {
             player_id,
         };
 
+        let payload = broadcast.serialize();
+
         self.broadcast_to_lobby_except(
             lobby_name,
             except_addr,
             PacketType::PlayerConnected,
-            &broadcast,
+            &payload,
         )
         .await
     }
 
-    async fn broadcast_to_lobby_except<T: serde::Serialize>(
+    async fn broadcast_to_lobby_except(
         &self,
         lobby_name: &str,
         except_addr: SocketAddr,
         packet_type: PacketType,
-        data: &T,
+        payload: &[u8],
     ) -> Result<()> {
-        let payload = rmp_serde::to_vec(data)?;
         let addresses = self.state.get_lobby_players_except(lobby_name, 0).await;
 
         for addr in addresses {
             if addr != except_addr {
-                if let Err(e) = self.send_packet_maybe_reliable(packet_type, &payload, addr).await {
+                if let Err(e) = self.send_packet_maybe_reliable(packet_type, payload, addr).await {
                     warn!("Failed to send to {}: {}", addr, e);
                 }
             }
@@ -1012,14 +1045,13 @@ impl NetworkServer {
         Ok(())
     }
 
-    async fn send_packet_serialized<T: serde::Serialize>(
+    async fn send_packet_serialized(
         &self,
         packet_type: PacketType,
-        data: &T,
+        payload: &[u8],
         addr: SocketAddr,
     ) -> Result<()> {
-        let payload = rmp_serde::to_vec(data)?;
-        self.send_packet_maybe_reliable(packet_type, &payload, addr).await
+        self.send_packet_maybe_reliable(packet_type, payload, addr).await
     }
 
     async fn send_packet_maybe_reliable(

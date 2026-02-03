@@ -1,200 +1,437 @@
-﻿use serde::{Deserialize, Serialize};
+﻿use anyhow::{anyhow, Result};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Helper function to read big-endian u32
+fn read_u32_be(data: &[u8], offset: usize) -> Result<u32> {
+    if offset + 4 > data.len() {
+        return Err(anyhow!("Not enough data to read u32"));
+    }
+    Ok(((data[offset] as u32) << 24)
+        | ((data[offset + 1] as u32) << 16)
+        | ((data[offset + 2] as u32) << 8)
+        | (data[offset + 3] as u32))
+}
+
+// Helper function to read big-endian i32
+fn read_i32_be(data: &[u8], offset: usize) -> Result<i32> {
+    Ok(read_u32_be(data, offset)? as i32)
+}
+
+// Helper function to write big-endian u32
+fn write_u32_be(buf: &mut Vec<u8>, value: u32) {
+    buf.push((value >> 24) as u8);
+    buf.push((value >> 16) as u8);
+    buf.push((value >> 8) as u8);
+    buf.push(value as u8);
+}
+
+// Helper function to write big-endian i32
+fn write_i32_be(buf: &mut Vec<u8>, value: i32) {
+    write_u32_be(buf, value as u32);
+}
+
+#[derive(Debug, Clone)]
 pub struct LoginPacket {
-    #[serde(rename = "LobbyName")]
     pub lobby_name: String,
-
-    #[serde(rename = "Password")]
     pub password: String,
-
-    #[serde(rename = "Username")]
     pub username: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JiggyPacket {
-    #[serde(rename = "JiggyEnumId")]
-    pub jiggy_enum_id: i32,
+impl LoginPacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        let mut offset = 0;
 
-    #[serde(rename = "CollectedValue")]
+        // Read lobby_name
+        if offset + 4 > data.len() {
+            return Err(anyhow!(
+                "Invalid LoginPacket: not enough data for lobby_name length"
+            ));
+        }
+        let lobby_len = read_u32_be(data, offset)? as usize;
+        offset += 4;
+
+        if offset + lobby_len > data.len() {
+            return Err(anyhow!(
+                "Invalid LoginPacket: not enough data for lobby_name"
+            ));
+        }
+        let lobby_name = String::from_utf8(data[offset..offset + lobby_len].to_vec())?;
+        offset += lobby_len;
+
+        // Read password
+        if offset + 4 > data.len() {
+            return Err(anyhow!(
+                "Invalid LoginPacket: not enough data for password length"
+            ));
+        }
+        let pass_len = read_u32_be(data, offset)? as usize;
+        offset += 4;
+
+        if offset + pass_len > data.len() {
+            return Err(anyhow!("Invalid LoginPacket: not enough data for password"));
+        }
+        let password = String::from_utf8(data[offset..offset + pass_len].to_vec())?;
+        offset += pass_len;
+
+        // Read username
+        if offset + 4 > data.len() {
+            return Err(anyhow!(
+                "Invalid LoginPacket: not enough data for username length"
+            ));
+        }
+        let user_len = read_u32_be(data, offset)? as usize;
+        offset += 4;
+
+        if offset + user_len > data.len() {
+            return Err(anyhow!("Invalid LoginPacket: not enough data for username"));
+        }
+        let username = String::from_utf8(data[offset..offset + user_len].to_vec())?;
+
+        Ok(LoginPacket {
+            lobby_name,
+            password,
+            username,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct JiggyPacket {
+    pub jiggy_enum_id: i32,
     pub collected_value: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl JiggyPacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 8 {
+            return Err(anyhow!("Invalid JiggyPacket: expected 8 bytes"));
+        }
+        Ok(JiggyPacket {
+            jiggy_enum_id: read_i32_be(data, 0)?,
+            collected_value: read_i32_be(data, 4)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct NotePacket {
-    #[serde(rename = "MapId")]
     pub map_id: i32,
-
-    #[serde(rename = "LevelId")]
     pub level_id: i32,
-
-    #[serde(rename = "IsDynamic")]
     pub is_dynamic: bool,
-
-    #[serde(rename = "NoteIndex")]
     pub note_index: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotePacketPos {
-    #[serde(rename = "MapId")]
-    pub map_id: i32,
-
-    #[serde(rename = "X")]
-    pub x: i16,
-
-    #[serde(rename = "Y")]
-    pub y: i16,
-
-    #[serde(rename = "Z")]
-    pub z: i16
+impl NotePacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 16 {
+            return Err(anyhow!("Invalid NotePacket: expected 16 bytes"));
+        }
+        Ok(NotePacket {
+            map_id: read_i32_be(data, 0)?,
+            level_id: read_i32_be(data, 4)?,
+            is_dynamic: read_i32_be(data, 8)? != 0,
+            note_index: read_i32_be(data, 12)?,
+        })
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LevelOpenedPacket {
-    #[serde(rename = "WorldId")]
-    pub world_id: i32,
+#[derive(Debug, Clone)]
+pub struct NotePacketPos {
+    pub map_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
 
-    #[serde(rename = "JiggyCost")]
+impl NotePacketPos {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 16 {
+            return Err(anyhow!("Invalid NotePacketPos: expected 16 bytes"));
+        }
+        Ok(NotePacketPos {
+            map_id: read_i32_be(data, 0)?,
+            x: read_i32_be(data, 4)?,
+            y: read_i32_be(data, 8)?,
+            z: read_i32_be(data, 12)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LevelOpenedPacket {
+    pub world_id: i32,
     pub jiggy_cost: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl LevelOpenedPacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 8 {
+            return Err(anyhow!("Invalid LevelOpenedPacket: expected 8 bytes"));
+        }
+        Ok(LevelOpenedPacket {
+            world_id: read_i32_be(data, 0)?,
+            jiggy_cost: read_i32_be(data, 4)?,
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&self.world_id.to_be_bytes());
+        payload.extend_from_slice(&self.jiggy_cost.to_be_bytes());
+        payload
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FileProgressFlagsPacket {
+    pub flags: Vec<u8>,
+}
+
+impl FileProgressFlagsPacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        Ok(FileProgressFlagsPacket {
+            flags: data.to_vec(),
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        self.flags.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AbilityProgressPacket {
+    pub bytes: Vec<u8>,
+}
+
+impl AbilityProgressPacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        Ok(AbilityProgressPacket {
+            bytes: data.to_vec(),
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HoneycombScorePacket {
+    pub bytes: Vec<u8>,
+}
+
+impl HoneycombScorePacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        Ok(HoneycombScorePacket {
+            bytes: data.to_vec(),
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MumboScorePacket {
+    pub bytes: Vec<u8>,
+}
+
+impl MumboScorePacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        Ok(MumboScorePacket {
+            bytes: data.to_vec(),
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HoneycombCollectedPacket {
+    pub map_id: i32,
+    pub honeycomb_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+impl HoneycombCollectedPacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 20 {
+            return Err(anyhow!(
+                "Invalid HoneycombCollectedPacket: expected 20 bytes"
+            ));
+        }
+        Ok(HoneycombCollectedPacket {
+            map_id: read_i32_be(data, 0)?,
+            honeycomb_id: read_i32_be(data, 4)?,
+            x: read_i32_be(data, 8)?,
+            y: read_i32_be(data, 12)?,
+            z: read_i32_be(data, 16)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MumboTokenCollectedPacket {
+    pub map_id: i32,
+    pub token_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+impl MumboTokenCollectedPacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 20 {
+            return Err(anyhow!(
+                "Invalid MumboTokenCollectedPacket: expected 20 bytes"
+            ));
+        }
+        Ok(MumboTokenCollectedPacket {
+            map_id: read_i32_be(data, 0)?,
+            token_id: read_i32_be(data, 4)?,
+            x: read_i32_be(data, 8)?,
+            y: read_i32_be(data, 12)?,
+            z: read_i32_be(data, 16)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NoteSaveDataPacket {
+    pub level_index: i32,
+    pub save_data: Vec<u8>,
+}
+
+impl NoteSaveDataPacket {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 4 {
+            return Err(anyhow!(
+                "Invalid NoteSaveDataPacket: expected at least 4 bytes"
+            ));
+        }
+        Ok(NoteSaveDataPacket {
+            level_index: read_i32_be(data, 0)?,
+            save_data: data[4..].to_vec(),
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&self.level_index.to_be_bytes());
+        payload.extend_from_slice(&self.save_data);
+        payload
+    }
+}
+
+// Broadcast structures for sending
+#[derive(Debug, Clone)]
 pub struct BroadcastJiggy {
     pub jiggy_enum_id: i32,
     pub collected_value: i32,
-    pub collector: String
+    pub collector: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl BroadcastJiggy {
+    pub fn serialize(&self, player_id: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, player_id);
+        write_i32_be(&mut buf, self.jiggy_enum_id);
+        write_i32_be(&mut buf, self.collected_value);
+        buf
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct BroadcastNote {
     pub map_id: i32,
     pub level_id: i32,
     pub is_dynamic: bool,
     pub note_index: i32,
-    pub collector: String
+    pub collector: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl BroadcastNote {
+    pub fn serialize(&self, player_id: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, player_id);
+        write_i32_be(&mut buf, self.map_id);
+        write_i32_be(&mut buf, self.level_id);
+        write_i32_be(&mut buf, if self.is_dynamic { 1 } else { 0 });
+        write_i32_be(&mut buf, self.note_index);
+        buf
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct BroadcastNotePos {
     pub map_id: i32,
-    pub x: i16,
-    pub y: i16,
-    pub z: i16,
-    pub collector: String
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NoteSaveDataPacket {
-    pub level_index: i32,
-    pub save_data: Vec<u8>
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileProgressFlagsPacket {
-    #[serde(rename = "Flags")]
-    pub flags: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AbilityProgressPacket {
-    #[serde(rename = "Bytes")]
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HoneycombScorePacket {
-    #[serde(rename = "Bytes")]
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MumboScorePacket {
-    #[serde(rename = "Bytes")]
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HoneycombCollectedPacket {
-    #[serde(rename = "MapId")]
-    pub map_id: i32,
-
-    #[serde(rename = "HoneycombId")]
-    pub honeycomb_id: i32,
-
-    #[serde(rename = "X")]
-    pub x: i32,
-
-    #[serde(rename = "Y")]
-    pub y: i32,
-
-    #[serde(rename = "Z")]
-    pub z: i32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MumboTokenCollectedPacket {
-    #[serde(rename = "MapId")]
-    pub map_id: i32,
-
-    #[serde(rename = "TokenId")]
-    pub token_id: i32,
-
-    #[serde(rename = "X")]
-    pub x: i32,
-
-    #[serde(rename = "Y")]
-    pub y: i32,
-
-    #[serde(rename = "Z")]
-    pub z: i32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BroadcastHoneycombCollected {
-    pub map_id: i32,
-    pub honeycomb_id: i32,
     pub x: i32,
     pub y: i32,
     pub z: i32,
     pub collector: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BroadcastMumboTokenCollected {
-    pub map_id: i32,
-    pub token_id: i32,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub collector: String,
+impl BroadcastNotePos {
+    pub fn serialize(&self, player_id: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, player_id);
+        write_i32_be(&mut buf, self.map_id);
+        write_i32_be(&mut buf, self.x);
+        write_i32_be(&mut buf, self.y);
+        write_i32_be(&mut buf, self.z);
+        buf
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PuppetUpdatePacket {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub yaw: f32,
-    pub pitch: f32,
-    pub roll: f32,
-    pub anim_duration: f32,
-    pub map_id: i16,
-    pub level_id: i16,
-    pub anim_id: i16,
-    pub model_id: u8,
-    pub flags: u8,
+#[derive(Debug, Clone)]
+pub struct BroadcastLevelOpened {
+    pub world_id: i32,
+    pub jiggy_cost: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl BroadcastLevelOpened {
+    pub fn serialize(&self, player_id: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, player_id);
+        write_i32_be(&mut buf, self.world_id);
+        write_i32_be(&mut buf, self.jiggy_cost);
+        buf
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PlayerConnectedBroadcast {
     pub username: String,
     pub player_id: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl PlayerConnectedBroadcast {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, self.player_id);
+        write_u32_be(&mut buf, self.username.len() as u32);
+        buf.extend_from_slice(self.username.as_bytes());
+        buf
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PlayerDisconnectedBroadcast {
     pub username: String,
     pub player_id: u32,
+}
+
+impl PlayerDisconnectedBroadcast {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, self.player_id);
+        write_u32_be(&mut buf, self.username.len() as u32);
+        buf.extend_from_slice(self.username.as_bytes());
+        buf
+    }
 }

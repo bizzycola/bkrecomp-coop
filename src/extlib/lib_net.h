@@ -64,6 +64,12 @@ private:
     void HandleNoteSaveData(const uint8_t* data, int len);
     void HandlePuppetUpdate(const uint8_t* data, int len);
     void HandleLevelOpened(const uint8_t* data, int len);
+    void HandleFileProgressFlags(const uint8_t* data, int len);
+    void HandleAbilityProgress(const uint8_t* data, int len);
+    void HandleHoneycombScore(const uint8_t* data, int len);
+    void HandleMumboScore(const uint8_t* data, int len);
+    void HandleHoneycombCollected(const uint8_t* data, int len);
+    void HandleMumboTokenCollected(const uint8_t* data, int len);
     void EnqueueEvent(PacketType type, const std::string& text, const std::vector<int32_t>& data, int playerId = -1);
 
 public:
