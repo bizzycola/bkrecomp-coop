@@ -163,6 +163,21 @@ void send_ability_progress_blob(void)
         native_send_ability_progress(ptr, size);
     }
 }
+int send_ability_progress_blob_cmd(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    if (applying_remote_state())
+    {
+        return 1;
+    }
+
+    send_ability_progress_blob();
+    console_log_info("Sent ability progress blob");
+
+    return 1;
+}
 
 void send_honeycomb_score_blob(void)
 {
@@ -177,6 +192,22 @@ void send_honeycomb_score_blob(void)
     }
 }
 
+int send_honeycomb_score_blob_cmd(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    if (applying_remote_state())
+    {
+        return 1;
+    }
+
+    send_honeycomb_score_blob();
+    console_log_info("Sent Honeycomb score blob");
+
+    return 1;
+}
+
 void send_mumbo_score_blob(void)
 {
     extern void mumboscore_getSizeAndPtr(s32 * sizeOut, void **ptrOut);
@@ -188,6 +219,22 @@ void send_mumbo_score_blob(void)
     {
         native_send_mumbo_score(ptr, size);
     }
+}
+
+int send_mumbo_score_blob_cmd(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    if (applying_remote_state())
+    {
+        return 1;
+    }
+
+    send_mumbo_score_blob();
+    console_log_info("Sent Mumbo score blob");
+
+    return 1;
 }
 
 RECOMP_HOOK("transitionToMap")
@@ -430,6 +477,10 @@ void on_init(void)
     player_list_init();
     player_list_ui_init();
     console_init();
+
+    console_register_command("send_mumbo_score_blob", send_mumbo_score_blob_cmd, "Send current level mumbo token collection blob");
+    console_register_command("send_honeycomb_score_blob", send_honeycomb_score_blob_cmd, "Send current level honeycomb collection blob");
+    console_register_command("send_ability_progress_blob", send_ability_progress_blob_cmd, "Send current ability progress blob");
 
     if (!bkrecomp_note_saving_enabled())
     {

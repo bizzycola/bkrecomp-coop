@@ -45,7 +45,6 @@ void console_handle_key(char key);
 void console_handle_backspace(void);
 void console_handle_enter(void);
 
-// Update console (called from main loop)
 void console_update(void);
 
 #endif // CONSOLE_H

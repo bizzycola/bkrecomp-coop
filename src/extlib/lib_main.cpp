@@ -19,6 +19,7 @@
 #include "lib_recomp.hpp"
 #include "lib_net.h"
 #include "lib_message_queue.h"
+#include "console_input.h"
 
 void coop_dll_log(const char *msg)
 {
@@ -810,130 +811,8 @@ RECOMP_DLL_FUNC(GetClockMS)
     RECOMP_RETURN(uint32_t, time);
 }
 
-#if defined(_WIN32)
-static bool g_last_tilde_state = false;
-static bool g_console_is_open = false;
-static std::string g_input_buffer;
-
-static bool IsKeyJustPressed(int vkCode, bool &lastState)
-{
-    bool currentState = (GetAsyncKeyState(vkCode) & 0x8000) != 0;
-    bool justPressed = currentState && !lastState;
-    lastState = currentState;
-    return justPressed;
-}
-
-static void PollConsoleInput()
-{
-    bool tildePressed = (GetAsyncKeyState(VK_OEM_3) & 0x8000) != 0;
-    if (tildePressed && !g_last_tilde_state)
-    {
-        g_console_is_open = !g_console_is_open;
-        GameMessage msg;
-        memset(&msg, 0, sizeof(GameMessage));
-        msg.type = 21;
-        g_messageQueue.Push(msg);
-    }
-    g_last_tilde_state = tildePressed;
-
-    if (!g_console_is_open)
-        return;
-
-    for (int vk = 0x20; vk <= 0x5A; vk++)
-    {
-        if (GetAsyncKeyState(vk) & 0x8000)
-        {
-            bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-            char c = 0;
-
-            if (vk >= 0x30 && vk <= 0x39)
-            {
-                if (shift)
-                {
-                    const char *shifted = ")!@#$%^&*(";
-                    c = shifted[vk - 0x30];
-                }
-                else
-                {
-                    c = (char)vk;
-                }
-            }
-            else if (vk >= 0x41 && vk <= 0x5A)
-            {
-                c = (char)vk;
-                if (!shift)
-                    c += 32;
-            }
-            else if (vk == VK_SPACE)
-            {
-                c = ' ';
-            }
-
-            if (c != 0)
-            {
-                static int last_vk = 0;
-                static auto last_time = std::chrono::steady_clock::now();
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time).count();
-
-                if (vk != last_vk || elapsed > 100)
-                {
-                    GameMessage msg;
-                    memset(&msg, 0, sizeof(GameMessage));
-                    msg.type = 20;
-                    msg.param1 = (int)c;
-                    g_messageQueue.Push(msg);
-
-                    last_vk = vk;
-                    last_time = now;
-                }
-            }
-            break;
-        }
-    }
-
-    if (GetAsyncKeyState(VK_BACK) & 0x8000)
-    {
-        static auto last_backspace = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_backspace).count();
-
-        if (elapsed > 100)
-        {
-            GameMessage msg;
-            memset(&msg, 0, sizeof(GameMessage));
-            msg.type = 20;
-            msg.param1 = (int)'\b';
-            g_messageQueue.Push(msg);
-            last_backspace = now;
-        }
-    }
-
-    if (GetAsyncKeyState(VK_RETURN) & 0x8000)
-    {
-        static auto last_enter = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_enter).count();
-
-        if (elapsed > 200)
-        {
-            GameMessage msg;
-            memset(&msg, 0, sizeof(GameMessage));
-            msg.type = 20;
-            msg.param1 = (int)'\r';
-            g_messageQueue.Push(msg);
-            last_enter = now;
-        }
-    }
-}
-#else
-static void PollConsoleInput()
-{
-}
-#endif
-
 RECOMP_DLL_FUNC(native_poll_console_input)
 {
-    PollConsoleInput();
+    ConsoleInput_Poll();
     RECOMP_RETURN(int, 0);
 }

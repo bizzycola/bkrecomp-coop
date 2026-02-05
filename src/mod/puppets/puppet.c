@@ -2,6 +2,7 @@
 #include "recomputils.h"
 #include "core2/anctrl.h"
 #include "core2/modelRender.h"
+#include "console/console.h"
 
 RECOMP_IMPORT(".", unsigned int GetClockMS(void));
 RECOMP_IMPORT(".", void net_send_puppet_update(int x, int y, int z, int rot));
@@ -182,33 +183,6 @@ Actor *puppet_actor_draw(ActorMarker *marker, Gfx **gfx, Mtx **mtx, Vtx **vtx)
     }
 
     return actor_draw(marker, gfx, mtx, vtx);
-}
-
-void puppet_system_init(void)
-{
-    for (int i = 0; i < MAX_PUPPETS; i++)
-    {
-        s_puppets[i].marker = NULL;
-        s_puppets[i].is_spawned = 0;
-        s_puppets[i].last_update_time = 0;
-        s_puppet_interp[i].has_target = 0;
-    }
-
-    s_puppetActorInfo.markerId = MARKER_PUPPET;
-    s_puppetActorInfo.actorId = ACTOR_PUPPET;
-    s_puppetActorInfo.modelId = MODEL_BANJO_LOW_POLY;
-    s_puppetActorInfo.startAnimation = 0;
-    s_puppetActorInfo.animations = puppet_anim_table;
-    s_puppetActorInfo.update_func = puppet_actor_update;
-    s_puppetActorInfo.update2_func = actor_update_func_80326224;
-    s_puppetActorInfo.draw_func = actor_draw;
-    s_puppetActorInfo.unk18 = 0;
-    s_puppetActorInfo.draw_distance = 0;
-    s_puppetActorInfo.shadow_scale = 0.0f;
-    s_puppetActorInfo.unk20 = 0;
-
-    spawnableActorList_add(&s_puppetActorInfo, actor_new, 0);
-    s_puppet_registered = 1;
 }
 
 Actor *puppet_spawn(f32 position[3], f32 yaw)
@@ -398,6 +372,16 @@ void puppet_despawn_all(void)
             }
         }
     }
+}
+int puppet_despawn_all_cmd(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    puppet_despawn_all();
+    console_log_success("All puppets despawned");
+
+    return 1;
 }
 
 void puppet_set_spawn_delay_all(void)
@@ -734,4 +718,38 @@ void puppet_update_all(void)
             }
         }
     }
+}
+
+static int puppet_cmd_init = 0;
+void puppet_system_init(void)
+{
+    for (int i = 0; i < MAX_PUPPETS; i++)
+    {
+        s_puppets[i].marker = NULL;
+        s_puppets[i].is_spawned = 0;
+        s_puppets[i].last_update_time = 0;
+        s_puppet_interp[i].has_target = 0;
+    }
+
+    s_puppetActorInfo.markerId = MARKER_PUPPET;
+    s_puppetActorInfo.actorId = ACTOR_PUPPET;
+    s_puppetActorInfo.modelId = MODEL_BANJO_LOW_POLY;
+    s_puppetActorInfo.startAnimation = 0;
+    s_puppetActorInfo.animations = puppet_anim_table;
+    s_puppetActorInfo.update_func = puppet_actor_update;
+    s_puppetActorInfo.update2_func = actor_update_func_80326224;
+    s_puppetActorInfo.draw_func = actor_draw;
+    s_puppetActorInfo.unk18 = 0;
+    s_puppetActorInfo.draw_distance = 0;
+    s_puppetActorInfo.shadow_scale = 0.0f;
+    s_puppetActorInfo.unk20 = 0;
+
+    spawnableActorList_add(&s_puppetActorInfo, actor_new, 0);
+    s_puppet_registered = 1;
+
+    if (!puppet_cmd_init)
+    {
+        console_register_command("puppet_despawn_all", puppet_despawn_all_cmd, "Despawn all puppets");
+    }
+    puppet_cmd_init = 1;
 }
