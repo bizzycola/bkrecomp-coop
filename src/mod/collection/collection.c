@@ -1,5 +1,9 @@
 #include "collection.h"
 #include "bkrecomp_api.h"
+#include "../sync/sync.h"
+
+typedef struct actor_array ActorArray;
+extern ActorArray *suBaddieActorArray;
 
 static bool apply_remote_state = FALSE;
 
@@ -15,6 +19,7 @@ extern enum level_e level_get(void);
 extern void transitionToMap(enum map_e map, s32 exit, s32 transition);
 extern s32 fileProgressFlag_get(enum file_progress_e flag);
 extern void fileProgressFlag_set(enum file_progress_e flag, s32 value);
+extern Actor *actorArray_findActorFromActorId(enum actor_e actor_id);
 
 extern struct
 {
@@ -125,7 +130,7 @@ typedef struct
 void collect_note(int map_id, int level_id, bool is_dynamic, int note_index)
 {
     recomp_printf("[COLLECTION] collect_note called: map=%d, level=%d, is_dynamic=%d, note_index=%d\n",
-           map_id, level_id, is_dynamic, note_index);
+                  map_id, level_id, is_dynamic, note_index);
 
     if (!bkrecomp_note_saving_active())
     {
@@ -244,4 +249,67 @@ void open_level(int world_id, int jiggy_cost)
     {
         transitionToMap(current_map, -1, 0);
     }
+}
+
+void despawn_collected_items_in_map(void)
+{
+    if (suBaddieActorArray == NULL)
+    {
+        return;
+    }
+
+    enum map_e current_map = map_get();
+    int despawned_honeycombs = 0;
+    int despawned_tokens = 0;
+
+    extern enum honeycomb_e func_802CA1C4(Actor * this);
+    extern enum mumbotoken_e func_802E0CB0(Actor * this);
+
+    Actor *begin = suBaddieActorArray->data;
+    Actor *end = begin + suBaddieActorArray->cnt;
+
+    int checked_actors = 0;
+    for (Actor *actor = begin; actor < end; actor++)
+    {
+        if (actor->despawn_flag || actor->marker == NULL)
+        {
+            continue;
+        }
+
+        checked_actors++;
+        enum actor_e actor_id = actor->modelCacheIndex;
+
+        if (actor_id == ACTOR_47_EMPTY_HONEYCOMB || actor_id == ACTOR_50_HONEYCOMB)
+        {
+            enum honeycomb_e honeycomb_id = func_802CA1C4(actor);
+
+            if (sync_is_honeycomb_collected((s16)current_map, (s16)honeycomb_id))
+            {
+                marker_despawn(actor->marker);
+                despawned_honeycombs++;
+            }
+        }
+        else if (actor_id == ACTOR_2D_MUMBO_TOKEN)
+        {
+            enum mumbotoken_e token_id = func_802E0CB0(actor);
+
+            if (sync_is_token_collected((s16)current_map, (s16)token_id))
+            {
+                marker_despawn(actor->marker);
+                despawned_tokens++;
+            }
+        }
+    }
+
+    if (despawned_honeycombs > 0 || despawned_tokens > 0)
+    {
+        recomp_printf("[MapLoad] Despawned %d honeycombs, %d tokens\n",
+                      despawned_honeycombs, despawned_tokens);
+    }
+}
+
+RECOMP_HOOK_RETURN("spawnQueue_flush")
+void spawnQueue_flush_hook(void)
+{
+    despawn_collected_items_in_map();
 }

@@ -8,10 +8,8 @@
 #include <memory>
 #include <functional>
 
-// Include the packet definitions provided previously
 #include "lib_packets.h"
 
-// Platform specific socket includes
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
@@ -73,6 +71,9 @@ private:
     void HandleMumboScore(const uint8_t* data, int len);
     void HandleHoneycombCollected(const uint8_t* data, int len);
     void HandleMumboTokenCollected(const uint8_t* data, int len);
+    void HandlePlayerInfoRequest(const uint8_t* data, int len);
+    void HandlePlayerInfoResponse(const uint8_t* data, int len);
+    void HandlePlayerListUpdate(const uint8_t* data, int len);
     void EnqueueEvent(PacketType type, const std::string& text, const std::vector<int32_t>& data, int playerId = -1);
 
 public:
@@ -91,7 +92,6 @@ public:
     void RequestFullSync();
     uint32_t GetClockMS();
     
-    // Stub methods for new save data (not implemented yet)
     void SendFileProgressFlags(const std::vector<uint8_t>& flags);
     void SendAbilityProgress(const std::vector<uint8_t>& bytes);
     void SendHoneycombScore(const std::vector<uint8_t>& bytes);
@@ -99,4 +99,6 @@ public:
     void SendHoneycombCollected(int mapId, int honeycombId, int x, int y, int z);
     void SendMumboTokenCollected(int mapId, int tokenId, int x, int y, int z);
     void UploadInitialSaveData();
+    void SendPlayerInfoRequest(uint32_t targetPlayerId, uint32_t requesterPlayerId);
+    void SendPlayerInfoResponse(uint32_t targetPlayerId, int16_t mapId, int16_t levelId, float x, float y, float z, float yaw);
 };

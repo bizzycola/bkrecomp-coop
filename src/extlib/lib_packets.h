@@ -31,6 +31,10 @@ enum class PacketType : uint8_t
     NoteCollectedPos = 53,
     LevelOpened = 54,
 
+    PlayerInfoRequest = 55,
+    PlayerInfoResponse = 56,
+    PlayerListUpdate = 57,
+
     ReliableAck = 60,
 };
 
@@ -173,6 +177,29 @@ struct PlayerDisconnectedBroadcast
 {
     std::string username;
     uint32_t player_id;
+};
+
+struct PlayerInfoRequestPacket
+{
+    uint32_t target_player_id;
+    uint32_t requester_player_id;
+};
+
+struct PlayerInfoResponsePacket
+{
+    uint32_t target_player_id;
+    int16_t map_id;
+    int16_t level_id;
+    float x;
+    float y;
+    float z;
+    float yaw;
+};
+
+struct PlayerListEntryPacket
+{
+    uint32_t player_id;
+    std::string username;
 };
 
 #endif

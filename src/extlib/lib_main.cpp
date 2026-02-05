@@ -403,6 +403,15 @@ static uint8_t PacketTypeToMessageType(PacketType packetType)
     case PacketType::MumboTokenCollected:
         return (uint8_t)MessageType::MUMBO_TOKEN_COLLECTED;
 
+    case PacketType::PlayerInfoRequest:
+        return (uint8_t)MessageType::PLAYER_INFO_REQUEST;
+
+    case PacketType::PlayerInfoResponse:
+        return (uint8_t)MessageType::PLAYER_INFO_RESPONSE;
+
+    case PacketType::PlayerListUpdate:
+        return (uint8_t)MessageType::PLAYER_LIST_UPDATE;
+
     default:
         return 0;
     }
@@ -713,6 +722,45 @@ RECOMP_DLL_FUNC(native_send_mumbo_token_collected)
     RECOMP_RETURN(int, 1);
 }
 
+RECOMP_DLL_FUNC(native_send_player_info_request)
+{
+    uint32_t targetPlayerId = RECOMP_ARG(uint32_t, 0);
+    uint32_t requesterPlayerId = RECOMP_ARG(uint32_t, 1);
+
+    if (g_networkClient != nullptr)
+    {
+        g_networkClient->SendPlayerInfoRequest(targetPlayerId, requesterPlayerId);
+    }
+
+    RECOMP_RETURN(int, 1);
+}
+
+RECOMP_DLL_FUNC(native_send_player_info_response)
+{
+    uint32_t targetPlayerId = RECOMP_ARG(uint32_t, 0);
+    int16_t mapId = RECOMP_ARG(int16_t, 1);
+    int16_t levelId = RECOMP_ARG(int16_t, 2);
+    PTR(float)
+    posPtr = RECOMP_ARG(PTR(float), 3);
+
+    if (g_networkClient != nullptr && posPtr)
+    {
+        uint32_t x_bits = MEM_W(0, posPtr);
+        uint32_t y_bits = MEM_W(4, posPtr);
+        uint32_t z_bits = MEM_W(8, posPtr);
+        uint32_t yaw_bits = MEM_W(12, posPtr);
+
+        float x = *reinterpret_cast<float *>(&x_bits);
+        float y = *reinterpret_cast<float *>(&y_bits);
+        float z = *reinterpret_cast<float *>(&z_bits);
+        float yaw = *reinterpret_cast<float *>(&yaw_bits);
+
+        g_networkClient->SendPlayerInfoResponse(targetPlayerId, mapId, levelId, x, y, z, yaw);
+    }
+
+    RECOMP_RETURN(int, 1);
+}
+
 RECOMP_DLL_FUNC(net_send_puppet_update)
 {
     void *puppet_data = RECOMP_ARG(void *, 0);
@@ -760,4 +808,132 @@ RECOMP_DLL_FUNC(GetClockMS)
     }
 
     RECOMP_RETURN(uint32_t, time);
+}
+
+#if defined(_WIN32)
+static bool g_last_tilde_state = false;
+static bool g_console_is_open = false;
+static std::string g_input_buffer;
+
+static bool IsKeyJustPressed(int vkCode, bool &lastState)
+{
+    bool currentState = (GetAsyncKeyState(vkCode) & 0x8000) != 0;
+    bool justPressed = currentState && !lastState;
+    lastState = currentState;
+    return justPressed;
+}
+
+static void PollConsoleInput()
+{
+    bool tildePressed = (GetAsyncKeyState(VK_OEM_3) & 0x8000) != 0;
+    if (tildePressed && !g_last_tilde_state)
+    {
+        g_console_is_open = !g_console_is_open;
+        GameMessage msg;
+        memset(&msg, 0, sizeof(GameMessage));
+        msg.type = 21;
+        g_messageQueue.Push(msg);
+    }
+    g_last_tilde_state = tildePressed;
+
+    if (!g_console_is_open)
+        return;
+
+    for (int vk = 0x20; vk <= 0x5A; vk++)
+    {
+        if (GetAsyncKeyState(vk) & 0x8000)
+        {
+            bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+            char c = 0;
+
+            if (vk >= 0x30 && vk <= 0x39)
+            {
+                if (shift)
+                {
+                    const char *shifted = ")!@#$%^&*(";
+                    c = shifted[vk - 0x30];
+                }
+                else
+                {
+                    c = (char)vk;
+                }
+            }
+            else if (vk >= 0x41 && vk <= 0x5A)
+            {
+                c = (char)vk;
+                if (!shift)
+                    c += 32;
+            }
+            else if (vk == VK_SPACE)
+            {
+                c = ' ';
+            }
+
+            if (c != 0)
+            {
+                static int last_vk = 0;
+                static auto last_time = std::chrono::steady_clock::now();
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time).count();
+
+                if (vk != last_vk || elapsed > 100)
+                {
+                    GameMessage msg;
+                    memset(&msg, 0, sizeof(GameMessage));
+                    msg.type = 20;
+                    msg.param1 = (int)c;
+                    g_messageQueue.Push(msg);
+
+                    last_vk = vk;
+                    last_time = now;
+                }
+            }
+            break;
+        }
+    }
+
+    if (GetAsyncKeyState(VK_BACK) & 0x8000)
+    {
+        static auto last_backspace = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_backspace).count();
+
+        if (elapsed > 100)
+        {
+            GameMessage msg;
+            memset(&msg, 0, sizeof(GameMessage));
+            msg.type = 20;
+            msg.param1 = (int)'\b';
+            g_messageQueue.Push(msg);
+            last_backspace = now;
+        }
+    }
+
+    if (GetAsyncKeyState(VK_RETURN) & 0x8000)
+    {
+        static auto last_enter = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_enter).count();
+
+        if (elapsed > 200)
+        {
+            GameMessage msg;
+            memset(&msg, 0, sizeof(GameMessage));
+            msg.type = 20;
+            msg.param1 = (int)'\r';
+            g_messageQueue.Push(msg);
+            last_enter = now;
+        }
+    }
+}
+#else
+static void PollConsoleInput()
+{
+}
+#endif
+
+RECOMP_DLL_FUNC(native_poll_console_input)
+{
+    PollConsoleInput();
+    RECOMP_RETURN(int, 0);
 }

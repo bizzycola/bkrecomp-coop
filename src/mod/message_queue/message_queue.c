@@ -8,34 +8,67 @@
 #include "../collection/collection.h"
 #include "../puppets/puppet.h"
 #include "bkrecomp_api.h"
+#include "../include/mod/console/console.h"
+
+RECOMP_IMPORT(".", void native_send_player_info_response(u32 target_player_id, s16 map_id, s16 level_id, f32 *pos_and_yaw));
 
 extern ActorMarker *func_8032B16C(enum jiggy_e jiggy_id);
 extern Actor *marker_getActor(ActorMarker *marker);
 extern void marker_despawn(ActorMarker *marker);
 
-static float dist_sq_f3(float ax, float ay, float az, float bx, float by, float bz)
+typedef struct actor_array ActorArray;
+extern ActorArray *suBaddieActorArray;
+
+#define POS_TOLERANCE 10
+static int positions_match(s16 x1, s16 y1, s16 z1, s16 x2, s16 y2, s16 z2)
 {
-    float dx = ax - bx;
-    float dy = ay - by;
-    float dz = az - bz;
-    return (dx * dx) + (dy * dy) + (dz * dz);
+    int dx = x1 - x2;
+    int dy = y1 - y2;
+    int dz = z1 - z2;
+
+    if (dx < 0)
+        dx = -dx;
+    if (dy < 0)
+        dy = -dy;
+    if (dz < 0)
+        dz = -dz;
+
+    return (dx <= POS_TOLERANCE && dy <= POS_TOLERANCE && dz <= POS_TOLERANCE);
 }
 
 static void despawn_nearest_actor_by_id(int actor_id, float x, float y, float z)
 {
-    extern Actor *actorArray_findActorFromActorId(enum actor_e actor_id);
-
-    Actor *closest = actorArray_findActorFromActorId((enum actor_e)actor_id);
-    float best_d2 = 0.0f;
-    if (closest != NULL)
+    if (suBaddieActorArray == NULL)
     {
-        best_d2 = dist_sq_f3(closest->position[0], closest->position[1], closest->position[2], x, y, z);
+        return;
     }
 
-    const float max_d2 = 250.0f * 250.0f;
-    if (closest != NULL && best_d2 <= max_d2 && closest->marker != NULL)
+    s16 target_x = (s16)x;
+    s16 target_y = (s16)y;
+    s16 target_z = (s16)z;
+
+    Actor *begin = suBaddieActorArray->data;
+    Actor *end = begin + suBaddieActorArray->cnt;
+
+    for (Actor *actor = begin; actor < end; actor++)
     {
-        marker_despawn(closest->marker);
+        if (actor->despawn_flag || actor->marker == NULL)
+        {
+            continue;
+        }
+
+        if ((enum actor_e)actor_id == actor->modelCacheIndex)
+        {
+            s16 actor_x = (s16)actor->position[0];
+            s16 actor_y = (s16)actor->position[1];
+            s16 actor_z = (s16)actor->position[2];
+
+            if (positions_match(actor_x, actor_y, actor_z, target_x, target_y, target_z))
+            {
+                marker_despawn(actor->marker);
+                break;
+            }
+        }
     }
 }
 
@@ -228,6 +261,39 @@ void process_queue_message(const GameMessage *msg)
     case MSG_INITIAL_SAVE_DATA_REQUEST:
     {
         coop_mark_need_initial_upload();
+
+        extern enum map_e map_get(void);
+        extern int coop_network_is_safe_now(enum map_e map);
+        extern void native_upload_initial_save_data(void);
+        extern void native_send_file_progress_flags(u8 * data, int size);
+        extern void fileProgressFlag_getSizeAndPtr(s32 * size, u8 * *addr);
+        extern void send_ability_progress_blob(void);
+        extern void send_honeycomb_score_blob(void);
+        extern void send_mumbo_score_blob(void);
+
+        enum map_e current_map = map_get();
+        if (coop_network_is_safe_now(current_map))
+        {
+            toast_info("Uploading save state...");
+            native_upload_initial_save_data();
+
+            {
+                u8 *ptr = NULL;
+                int size = 0;
+                fileProgressFlag_getSizeAndPtr(&size, &ptr);
+                if (ptr != NULL && size > 0)
+                {
+                    native_send_file_progress_flags(ptr, size);
+                }
+            }
+
+            send_ability_progress_blob();
+            send_honeycomb_score_blob();
+            send_mumbo_score_blob();
+
+            extern void coop_clear_need_initial_upload(void);
+            coop_clear_need_initial_upload();
+        }
         break;
     }
 
@@ -237,11 +303,30 @@ void process_queue_message(const GameMessage *msg)
 
         if (username != NULL)
         {
-            toast_success(username);
+            char connectMsg[128];
+            int i = 0;
+
+            while (username[i] != '\0' && i < 100)
+            {
+                connectMsg[i] = username[i];
+                i++;
+            }
+
+            const char *suffix = " connected";
+            int j = 0;
+            while (suffix[j] != '\0' && i < 127)
+            {
+                connectMsg[i++] = suffix[j++];
+            }
+            connectMsg[i] = '\0';
+
+            toast_success(connectMsg);
+            console_log_info(connectMsg);
         }
         else
         {
             toast_success("Player connected");
+            console_log_info("Player connected (username not available)");
         }
 
         puppet_handle_player_connected(msg->playerId);
@@ -250,8 +335,14 @@ void process_queue_message(const GameMessage *msg)
 
     case MSG_PLAYER_DISCONNECTED:
     {
-        toast_info("Player disconnected");
+        recomp_printf("[MSG] PlayerDisconnected: ID=%d\n", msg->playerId);
         puppet_handle_player_disconnected(msg->playerId);
+
+        extern void player_list_remove_player(u32 player_id);
+        extern void player_list_ui_rebuild(void);
+
+        player_list_remove_player(msg->playerId);
+        player_list_ui_rebuild();
         break;
     }
 
@@ -279,7 +370,7 @@ void process_queue_message(const GameMessage *msg)
         int noteIndex = msg->param4;
 
         recomp_printf("[MSG_QUEUE] Processing NOTE_COLLECTED: map=%d, level=%d, is_dynamic=%d, note_index=%d\n",
-               mapId, levelId, isDynamic, noteIndex);
+                      mapId, levelId, isDynamic, noteIndex);
 
         if (!sync_is_note_collected(mapId, levelId, isDynamic, noteIndex))
         {
@@ -460,8 +551,6 @@ void process_queue_message(const GameMessage *msg)
         s16 y = (s16)msg->param4;
         s16 z = (s16)msg->param5;
 
-        toast_info("Honeycomb collected (net)");
-
         if (!sync_is_honeycomb_collected((s16)mapId, (s16)honeycombId))
         {
             sync_add_honeycomb(mapId, honeycombId, x, y, z);
@@ -484,8 +573,6 @@ void process_queue_message(const GameMessage *msg)
         s16 x = (s16)msg->param3;
         s16 y = (s16)msg->param4;
         s16 z = (s16)msg->param5;
-
-        toast_info("Mumbo token collected (net)");
 
         if (!sync_is_token_collected((s16)mapId, (s16)tokenId))
         {
@@ -515,7 +602,11 @@ void process_queue_message(const GameMessage *msg)
 
         if (statusBuf[0] != '\0')
         {
-            toast_info(statusBuf);
+            toast_show_immediate_custom("Connected!", TOAST_DEFAULT_DURATION,
+                                        TOAST_POS_TOP_RIGHT, TOAST_SIZE_MEDIUM, TOAST_STYLE_SUCCESS);
+
+            extern void player_list_ui_show(void);
+            player_list_ui_show();
         }
         break;
     }
@@ -535,6 +626,140 @@ void process_queue_message(const GameMessage *msg)
         if (errBuf[0] != '\0')
         {
             toast_error(errBuf);
+        }
+        break;
+    }
+
+    case MSG_PLAYER_INFO_REQUEST:
+    {
+        u32 target_id = (u32)msg->param1;
+        u32 requester_id = (u32)msg->param2;
+
+        recomp_printf("[MSG] PlayerInfoRequest: target=%u, requester=%u\n", target_id, requester_id);
+
+        extern enum map_e map_get(void);
+        extern s32 level_get(void);
+        extern void player_getPosition(f32 dst[3]);
+        extern f32 player_getYaw(void);
+
+        enum map_e current_map = map_get();
+        enum level_e current_level = (enum level_e)level_get();
+        f32 position[3];
+        player_getPosition(position);
+        f32 yaw = player_getYaw();
+
+        recomp_printf("[MSG] Responding with: map=%d, level=%d, pos=(%.1f,%.1f,%.1f), yaw=%.1f\n",
+                      current_map, current_level, position[0], position[1], position[2], yaw);
+
+        f32 pos_and_yaw[4] = {position[0], position[1], position[2], yaw};
+
+        native_send_player_info_response(requester_id, (s16)current_map, (s16)current_level, pos_and_yaw);
+        break;
+    }
+
+    case MSG_PLAYER_INFO_RESPONSE:
+    {
+        u32 target_player_id = (u32)msg->param1;
+        s16 remote_map = (s16)msg->param2;
+        s16 remote_level = (s16)msg->param3;
+
+        f32 x, y, z, yaw;
+        memcpy(&x, &msg->param4, sizeof(f32));
+        memcpy(&y, &msg->param5, sizeof(f32));
+        memcpy(&z, &msg->param6, sizeof(f32));
+        memcpy(&yaw, &msg->paramF1, sizeof(f32));
+
+        recomp_printf("[MSG] PlayerInfoResponse: target=%u, map=%d, level=%d, pos=(%.1f,%.1f,%.1f), yaw=%.1f\n",
+                      target_player_id, remote_map, remote_level, x, y, z, yaw);
+
+        extern enum map_e map_get(void);
+        extern s32 level_get(void);
+        extern void player_setPosition(f32 position[3]);
+        extern void transitionToMap(enum map_e map, s32 exit, s32 transition);
+
+        extern int s_pending_teleport;
+        extern enum map_e s_pending_teleport_map;
+        extern enum level_e s_pending_teleport_level;
+        extern f32 s_pending_teleport_position[3];
+        extern f32 s_pending_teleport_yaw;
+
+        enum map_e current_map = map_get();
+        enum level_e current_level = (enum level_e)level_get();
+
+        if (current_map == (enum map_e)remote_map && current_level == (enum level_e)remote_level)
+        {
+            f32 position[3] = {x, y, z};
+            player_setPosition(position);
+            recomp_printf("[MSG] Teleported to player in same map/level\n");
+            toast_success("Teleported to player");
+        }
+        else
+        {
+            recomp_printf("[MSG] Storing pending teleport and transitioning to map %d\n", remote_map);
+
+            s_pending_teleport = 1;
+            s_pending_teleport_map = (enum map_e)remote_map;
+            s_pending_teleport_level = (enum level_e)remote_level;
+            s_pending_teleport_position[0] = x;
+            s_pending_teleport_position[1] = y;
+            s_pending_teleport_position[2] = z;
+            s_pending_teleport_yaw = yaw;
+
+            transitionToMap((enum map_e)remote_map, 0, 0);
+            toast_info("Transitioning to player's location...");
+        }
+        break;
+    }
+
+    case MSG_PLAYER_LIST_UPDATE:
+    {
+        u32 player_id = (u32)msg->playerId;
+        char username[MAX_MESSAGE_DATA_SIZE + 1];
+        int n = (int)msg->dataSize;
+        if (n < 0)
+            n = 0;
+        if (n > MAX_MESSAGE_DATA_SIZE)
+            n = MAX_MESSAGE_DATA_SIZE;
+
+        memcpy(username, msg->data, (size_t)n);
+        username[n] = '\0';
+
+        recomp_printf("[MSG] PlayerListUpdate: ID=%u, Username=%s\n", player_id, username);
+
+        extern void player_list_add_player(u32 player_id, const char *username);
+        extern void player_list_ui_rebuild(void);
+
+        player_list_add_player(player_id, username);
+        player_list_ui_rebuild();
+        break;
+    }
+
+    case MSG_CONSOLE_TOGGLE:
+    {
+        extern void console_toggle(void);
+        console_toggle();
+        break;
+    }
+
+    case MSG_CONSOLE_KEY:
+    {
+        extern void console_handle_key(char key);
+        extern void console_handle_backspace(void);
+        extern void console_handle_enter(void);
+
+        char key = (char)msg->param1;
+
+        if (key == '\b')
+        {
+            console_handle_backspace();
+        }
+        else if (key == '\r' || key == '\n')
+        {
+            console_handle_enter();
+        }
+        else if (key >= 32 && key < 127)
+        {
+            console_handle_key(key);
         }
         break;
     }

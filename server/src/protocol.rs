@@ -22,8 +22,11 @@ pub enum PacketType {
     NoteCollected = 52,
     NoteCollectedPos = 53,
     LevelOpened = 54,
+    PlayerInfoRequest = 55,
+    PlayerInfoResponse = 56,
+    PlayerListUpdate = 57,
     ReliableAck = 60,
-    Unknown = 255
+    Unknown = 255,
 }
 
 impl From<u8> for PacketType {
@@ -50,8 +53,11 @@ impl From<u8> for PacketType {
             52 => PacketType::NoteCollected,
             53 => PacketType::NoteCollectedPos,
             54 => PacketType::LevelOpened,
+            55 => PacketType::PlayerInfoRequest,
+            56 => PacketType::PlayerInfoResponse,
+            57 => PacketType::PlayerListUpdate,
             60 => PacketType::ReliableAck,
-            _ => PacketType::Unknown
+            _ => PacketType::Unknown,
         }
     }
 }

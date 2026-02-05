@@ -125,7 +125,7 @@ void puppet_actor_update(Actor *this)
         if (this->anctrl != NULL)
         {
             int is_idle = (interp->target_anim == ANIM_BANJO_IDLE);
-            
+
             if (is_idle)
             {
                 enum asset_e current_anim = anctrl_getIndex(this->anctrl);
@@ -323,10 +323,10 @@ void puppet_update_animation(Actor *puppet, u16 anim_id, f32 duration, f32 timer
         anctrl_setDuration(puppet->anctrl, duration);
         anctrl_setPlaybackType(puppet->anctrl, (enum anctrl_playback_e)playback_type);
         anctrl_setDirection(puppet->anctrl, playback_direction);
-        
+
         f32 current_timer = anctrl_getAnimTimer(puppet->anctrl);
         f32 timer_diff = timer - current_timer;
-        
+
         if (playback_type == ANIMCTRL_LOOP)
         {
             if (timer_diff < -0.5f)
@@ -338,14 +338,16 @@ void puppet_update_animation(Actor *puppet, u16 anim_id, f32 duration, f32 timer
                 timer_diff -= 1.0f;
             }
         }
-        
+
         f32 new_timer = current_timer + timer_diff * ANIM_TIMER_INTERP_SPEED;
-        
-        if (new_timer < 0.0f) new_timer += 1.0f;
-        if (new_timer > 1.0f) new_timer -= 1.0f;
-        
+
+        if (new_timer < 0.0f)
+            new_timer += 1.0f;
+        if (new_timer > 1.0f)
+            new_timer -= 1.0f;
+
         anctrl_setAnimTimer(puppet->anctrl, new_timer);
-        
+
         anctrl_update(puppet->anctrl);
     }
 }

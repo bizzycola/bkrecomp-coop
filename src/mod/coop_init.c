@@ -19,12 +19,17 @@
 #include "sync/sync.h"
 #include "collection/collection.h"
 #include "bkrecomp_api.h"
+#include "player_list/player_list.h"
+#include "player_list/player_list_ui.h"
+#include "ui_context.h"
+#include "console/console.h"
 
 RECOMP_IMPORT(".", int native_lib_test(void));
 RECOMP_IMPORT(".", void native_connect_to_server(char *host, char *username, char *lobby_name, char *password));
 RECOMP_IMPORT(".", void native_update_network(void));
 RECOMP_IMPORT(".", void native_disconnect_from_server(void));
 RECOMP_IMPORT(".", void native_sync_jiggy(int jiggy_enum_id, int collected_value));
+RECOMP_IMPORT(".", void native_poll_console_input(void));
 RECOMP_IMPORT(".", void native_sync_note(int map_id, int level_id, int is_dynamic, int note_index));
 RECOMP_IMPORT(".", void native_send_level_opened(int world_id, int jiggy_cost));
 RECOMP_IMPORT(".", void native_upload_initial_save_data(void));
@@ -46,12 +51,19 @@ extern void fileProgressFlag_getSizeAndPtr(s32 *size, u8 **addr);
 #endif
 
 static enum map_e s_last_map = 0;
-static s32 s_frames_in_current_map = 0;
+static int s_frames_in_current_map = 0;
 static const s32 MIN_FRAMES_BEFORE_NETWORK = 10;
+
+// Pending teleport state (non-static so message_queue.c can access)
+int s_pending_teleport = 0;
+enum map_e s_pending_teleport_map = 0;
+enum level_e s_pending_teleport_level = 0;
+f32 s_pending_teleport_position[3] = {0.0f, 0.0f, 0.0f};
+f32 s_pending_teleport_yaw = 0.0f;
 
 static int is_real_map(enum map_e map);
 
-static int coop_network_is_safe_now(enum map_e map)
+int coop_network_is_safe_now(enum map_e map)
 {
     if (!is_real_map(map))
     {
@@ -73,6 +85,11 @@ static int s_need_connect = 0;
 void coop_mark_need_initial_upload(void)
 {
     s_need_initial_upload = 1;
+}
+
+void coop_clear_need_initial_upload(void)
+{
+    s_need_initial_upload = 0;
 }
 
 static int is_real_map(enum map_e map)
@@ -128,12 +145,13 @@ static void coop_try_connect_if_ready(void)
     }
 
     toast_info("Co-op: connecting...");
+    console_log_info("Co-op: connecting...");
     native_connect_to_server(host, username, lobby_name, password);
 
     s_need_connect = 0;
 }
 
-static void send_ability_progress_blob(void)
+void send_ability_progress_blob(void)
 {
     extern void ability_getSizeAndPtr(s32 * sizeOut, void **ptrOut);
     void *ptr = NULL;
@@ -146,7 +164,7 @@ static void send_ability_progress_blob(void)
     }
 }
 
-static void send_honeycomb_score_blob(void)
+void send_honeycomb_score_blob(void)
 {
     extern void honeycombscore_getSizeAndPtr(s32 * sizeOut, void **ptrOut);
     void *ptr = NULL;
@@ -159,7 +177,7 @@ static void send_honeycomb_score_blob(void)
     }
 }
 
-static void send_mumbo_score_blob(void)
+void send_mumbo_score_blob(void)
 {
     extern void mumboscore_getSizeAndPtr(s32 * sizeOut, void **ptrOut);
     void *ptr = NULL;
@@ -206,6 +224,15 @@ void coop_on_transition_to_map(enum map_e map, s32 exit, s32 transition)
     }
 }
 
+// RECOMP_HOOK_RETURN("transitionToMap")
+// void coop_on_transition_to_map_return(enum map_e map, s32 exit, s32 transition)
+// {
+//     (void)map;
+//     (void)exit;
+//     (void)transition;
+
+// }
+
 RECOMP_HOOK_RETURN("ability_setLearned")
 void ability_setLearned_hook(enum ability_e ability, bool val)
 {
@@ -225,20 +252,25 @@ void honeycombscore_set_hook(enum honeycomb_e indx, bool val)
         return;
     }
 
-    extern bool honeycombscore_get(enum honeycomb_e indx);
-    bool was_set = honeycombscore_get(indx);
+    enum map_e mapId = map_get();
+    if (sync_is_honeycomb_collected((s16)mapId, (s16)indx))
+    {
+        return;
+    }
 
     send_honeycomb_score_blob();
 
-    if (!was_set && val)
+    if (val)
     {
-        enum map_e mapId = map_get();
         float pos[3];
         player_getPosition(pos);
 
         s16 x = (s16)pos[0];
         s16 y = (s16)pos[1];
         s16 z = (s16)pos[2];
+
+        sync_add_honeycomb((int)mapId, (int)indx, x, y, z);
+
         int xyPacked = (((int)(u16)y) << 16) | ((u16)x);
         native_send_honeycomb_collected((int)mapId, (int)indx, xyPacked, (int)z);
     }
@@ -252,20 +284,25 @@ void mumboscore_set_hook(enum mumbotoken_e indx, bool val)
         return;
     }
 
-    extern bool mumboscore_get(enum mumbotoken_e indx);
-    bool was_set = mumboscore_get(indx);
+    enum map_e mapId = map_get();
+    if (sync_is_token_collected((s16)mapId, (s16)indx))
+    {
+        return;
+    }
 
     send_mumbo_score_blob();
 
-    if (!was_set && val)
+    if (val)
     {
-        enum map_e mapId = map_get();
         float pos[3];
         player_getPosition(pos);
 
         s16 x = (s16)pos[0];
         s16 y = (s16)pos[1];
         s16 z = (s16)pos[2];
+
+        sync_add_token((int)mapId, (int)indx, x, y, z);
+
         int xyPacked = (((int)(u16)y) << 16) | ((u16)x);
         native_send_mumbo_token_collected((int)mapId, (int)indx, xyPacked, (int)z);
     }
@@ -300,6 +337,31 @@ void mainLoop(void)
     else
     {
         s_frames_in_current_map++;
+
+        if (s_frames_in_current_map == 30)
+        {
+            despawn_collected_items_in_map();
+        }
+    }
+
+    if (s_pending_teleport)
+    {
+        if (current_map == s_pending_teleport_map && current_level == s_pending_teleport_level)
+        {
+            extern void player_setPosition(f32 position[3]);
+            player_setPosition(s_pending_teleport_position);
+
+            recomp_printf("[COOP] Pending teleport applied: pos=(%.1f,%.1f,%.1f)\n",
+                          s_pending_teleport_position[0], s_pending_teleport_position[1], s_pending_teleport_position[2]);
+
+            toast_success("Teleported to player");
+            s_pending_teleport = 0;
+        }
+        else if (COOP_DEBUG_LOGS)
+        {
+            recomp_printf("[COOP] Waiting for map transition: current=%d/%d, target=%d/%d\n",
+                          current_map, current_level, s_pending_teleport_map, s_pending_teleport_level);
+        }
     }
 
     if (COOP_MAINLOOP_STAGE >= 4)
@@ -334,6 +396,9 @@ void mainLoop(void)
         }
 
         puppet_update_all();
+        player_list_ui_update();
+        console_update();
+        native_poll_console_input();
     }
 
     if (COOP_MAINLOOP_STAGE >= 4)
@@ -359,7 +424,12 @@ void mainLoop(void)
 RECOMP_CALLBACK("*", recomp_on_init)
 void on_init(void)
 {
+    ui_context_init();
+
     toast_init();
+    player_list_init();
+    player_list_ui_init();
+    console_init();
 
     if (!bkrecomp_note_saving_enabled())
     {
@@ -413,7 +483,7 @@ RECOMP_CALLBACK("*", bkrecomp_note_collected_event)
 void on_note_collected(enum map_e map_id, enum level_e level_id, u8 note_index)
 {
     recomp_printf("[COOP] on_note_collected: map=%d, level=%d, note_index=%d\n", map_id, level_id, note_index);
-    
+
     if (applying_remote_state())
     {
         recomp_printf("[COOP] on_note_collected: skipping (applying_remote_state=TRUE)\n");
@@ -429,7 +499,7 @@ RECOMP_CALLBACK("*", bkrecomp_dynamic_note_collected_event)
 void on_dynamic_note_collected(enum map_e map_id, enum level_e level_id)
 {
     recomp_printf("[COOP] on_dynamic_note_collected: map=%d, level=%d\n", map_id, level_id);
-    
+
     if (applying_remote_state())
     {
         recomp_printf("[COOP] on_dynamic_note_collected: skipping (applying_remote_state=TRUE)\n");
@@ -437,7 +507,7 @@ void on_dynamic_note_collected(enum map_e map_id, enum level_e level_id)
     }
 
     int dynamic_count = bkrecomp_dynamic_note_collected_count(map_id);
-    recomp_printf("[COOP] on_dynamic_note_collected: syncing dynamic note (count=%d, index=%d)\n", 
+    recomp_printf("[COOP] on_dynamic_note_collected: syncing dynamic note (count=%d, index=%d)\n",
                   dynamic_count, dynamic_count - 1);
     sync_add_note(map_id, level_id, TRUE, dynamic_count - 1);
     native_sync_note(map_id, level_id, TRUE, (dynamic_count - 1));

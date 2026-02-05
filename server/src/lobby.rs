@@ -523,6 +523,32 @@ impl Lobby {
 
         if changed {
             self.update_activity();
+
+            for byte_index in 0..data.len() {
+                let byte = data[byte_index];
+                if byte == 0 {
+                    continue;
+                }
+
+                for bit_index in 0..8 {
+                    if (byte & (1 << bit_index)) != 0 {
+                        let honeycomb_id = (byte_index * 8 + bit_index) as i32;
+
+                        // Only add if not already in the list
+                        if !self.is_honeycomb_collected(0, honeycomb_id) {
+                            self.collected_honeycombs.push(CollectedHoneycomb {
+                                map_id: 0,
+                                honeycomb_id,
+                                x: 0,
+                                y: 0,
+                                z: 0,
+                                collected_by: "unknown".to_string(),
+                                timestamp: chrono::Utc::now().timestamp(),
+                            });
+                        }
+                    }
+                }
+            }
         }
 
         changed
@@ -533,6 +559,31 @@ impl Lobby {
 
         if changed {
             self.update_activity();
+
+            for byte_index in 0..data.len() {
+                let byte = data[byte_index];
+                if byte == 0 {
+                    continue;
+                }
+
+                for bit_index in 0..8 {
+                    if (byte & (1 << bit_index)) != 0 {
+                        let token_id = (byte_index * 8 + bit_index) as i32;
+
+                        if !self.is_mumbo_token_collected(0, token_id) {
+                            self.collected_mumbo_tokens.push(CollectedMumboToken {
+                                map_id: 0,
+                                token_id,
+                                x: 0,
+                                y: 0,
+                                z: 0,
+                                collected_by: "unknown".to_string(),
+                                timestamp: chrono::Utc::now().timestamp(),
+                            });
+                        }
+                    }
+                }
+            }
         }
 
         changed

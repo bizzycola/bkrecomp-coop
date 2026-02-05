@@ -44,7 +44,6 @@ void NetworkClient::Configure(const std::string &host, const std::string &user, 
     m_pass = pass;
     m_needsInit = true;
 
-    // Reset state
     m_isConnected = false;
     m_lastHandshakeTime = 0;
 }
@@ -139,12 +138,10 @@ void NetworkClient::SendReliablePacket(PacketType type, const void *data, size_t
         return;
     }
 
-    // Reliable packets have: [packet_type:1][seq:4][data:N]
     uint32_t seq = m_reliableSeqCounter++;
     std::vector<uint8_t> buffer(1 + 4 + size);
     buffer[0] = static_cast<uint8_t>(type);
-    
-    // Write sequence number in little-endian
+
     buffer[1] = (seq) & 0xFF;
     buffer[2] = (seq >> 8) & 0xFF;
     buffer[3] = (seq >> 16) & 0xFF;
@@ -192,26 +189,22 @@ void NetworkClient::Update()
 
     if (!m_isConnected && (now - m_lastHandshakeTime > HANDSHAKE_INTERVAL_MS))
     {
-        // Manual serialization for LoginPacket
         std::vector<uint8_t> buffer;
-        
-        // Pack lobby name
+
         uint32_t lobby_len = (uint32_t)m_lobby.size();
         buffer.push_back((lobby_len >> 24) & 0xFF);
         buffer.push_back((lobby_len >> 16) & 0xFF);
         buffer.push_back((lobby_len >> 8) & 0xFF);
         buffer.push_back(lobby_len & 0xFF);
         buffer.insert(buffer.end(), m_lobby.begin(), m_lobby.end());
-        
-        // Pack password
+
         uint32_t pass_len = (uint32_t)m_pass.size();
         buffer.push_back((pass_len >> 24) & 0xFF);
         buffer.push_back((pass_len >> 16) & 0xFF);
         buffer.push_back((pass_len >> 8) & 0xFF);
         buffer.push_back(pass_len & 0xFF);
         buffer.insert(buffer.end(), m_pass.begin(), m_pass.end());
-        
-        // Pack username
+
         uint32_t user_len = (uint32_t)m_user.size();
         buffer.push_back((user_len >> 24) & 0xFF);
         buffer.push_back((user_len >> 16) & 0xFF);
@@ -246,17 +239,13 @@ void NetworkClient::Update()
             uint8_t *payload = &buf[1];
             int payload_len = len - 1;
 
-            // Strip reliable sequence prefix if this is a reliable packet type
             if (IsReliableType(static_cast<PacketType>(type)) && payload_len >= 4)
             {
-                // Extract sequence number
                 uint32_t seq;
                 std::memcpy(&seq, payload, 4);
-                
-                // Send ACK
+
                 SendRawPacket(PacketType::ReliableAck, &seq, 4);
-                
-                // Skip sequence bytes
+
                 payload += 4;
                 payload_len -= 4;
             }
@@ -297,7 +286,7 @@ void NetworkClient::Update()
             case PacketType::Pong:
                 break;
             case PacketType::InitialSaveDataRequest:
-                // TODO: implement handler
+
                 break;
             case PacketType::FileProgressFlags:
                 HandleFileProgressFlags(payload, payload_len);
@@ -316,6 +305,15 @@ void NetworkClient::Update()
                 break;
             case PacketType::MumboTokenCollected:
                 HandleMumboTokenCollected(payload, payload_len);
+                break;
+            case PacketType::PlayerInfoRequest:
+                HandlePlayerInfoRequest(payload, payload_len);
+                break;
+            case PacketType::PlayerInfoResponse:
+                HandlePlayerInfoResponse(payload, payload_len);
+                break;
+            case PacketType::PlayerListUpdate:
+                HandlePlayerListUpdate(payload, payload_len);
                 break;
             default:
                 break;
@@ -361,16 +359,15 @@ void NetworkClient::HandlePlayerConnected(const uint8_t *data, int len)
     if (len < 8)
         return;
 
-    // Manual deserialization: player_id (4) + username_len (4) + username (variable)
-    uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) | 
+    uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
-    
-    uint32_t username_len = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) | 
+
+    uint32_t username_len = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) |
                             ((uint32_t)data[6] << 8) | ((uint32_t)data[7]);
-    
+
     if (len < (int)(8 + username_len))
         return;
-    
+
     std::string username((const char *)(data + 8), username_len);
 
     EnqueueEvent(PacketType::PlayerConnected, username, {}, player_id);
@@ -381,16 +378,15 @@ void NetworkClient::HandlePlayerDisconnected(const uint8_t *data, int len)
     if (len < 8)
         return;
 
-    // Manual deserialization: player_id (4) + username_len (4) + username (variable)
-    uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) | 
+    uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
-    
-    uint32_t username_len = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) | 
+
+    uint32_t username_len = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) |
                             ((uint32_t)data[6] << 8) | ((uint32_t)data[7]);
-    
+
     if (len < (int)(8 + username_len))
         return;
-    
+
     std::string username((const char *)(data + 8), username_len);
 
     EnqueueEvent(PacketType::PlayerDisconnected, username, {}, player_id);
@@ -401,7 +397,6 @@ void NetworkClient::HandleJiggyCollected(const uint8_t *data, int len)
     if (len < 12)
         return;
 
-    // Manual deserialization: player_id (4) + jiggy_enum_id (4) + collected_value (4)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -419,7 +414,6 @@ void NetworkClient::HandleNoteCollected(const uint8_t *data, int len)
     if (len < 20)
         return;
 
-    // Manual deserialization: player_id (4) + map_id (4) + level_id (4) + is_dynamic (4) + note_index (4)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -446,7 +440,6 @@ void NetworkClient::HandleNoteCollectedPos(const uint8_t *data, int len)
     if (len < 20)
         return;
 
-    // Manual deserialization: player_id (4) + map_id (4) + x (4) + y (4) + z (4)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -467,18 +460,10 @@ void NetworkClient::HandleNoteCollectedPos(const uint8_t *data, int len)
 
 void NetworkClient::HandleNoteSaveData(const uint8_t *data, int len)
 {
-    // TODO: Implement manual deserialization for NoteSaveData when needed
-    // Expected format: player_id (4) + level_index (4) + save_data_size (4) + save_data (variable)
 }
 
 void NetworkClient::HandlePuppetUpdate(const uint8_t *data, int len)
 {
-    // Expected format (after player_id):
-    // 8 floats (32 bytes): x, y, z, yaw, pitch, roll, anim_duration, anim_timer
-    // 2 bytes: level_id (int16, big-endian)
-    // 2 bytes: map_id (int16, big-endian)
-    // 2 bytes: anim_id (int16, big-endian)
-    // 4 bytes: model_id, flags, playback_type, playback_direction (uint8s)
     const int EXPECTED_LEN = 32 + 2 + 2 + 2 + 4; // 42 bytes
 
     if (len < EXPECTED_LEN)
@@ -490,7 +475,6 @@ void NetworkClient::HandlePuppetUpdate(const uint8_t *data, int len)
     std::memcpy(&player_id, data, 4);
     data += 4;
 
-    // Read 8 floats (x, y, z, yaw, pitch, roll, anim_duration, anim_timer)
     float x, y, z, yaw, pitch, roll, anim_duration, anim_timer;
 
     auto read_float = [&data]() -> float
@@ -514,7 +498,6 @@ void NetworkClient::HandlePuppetUpdate(const uint8_t *data, int len)
     anim_duration = read_float();
     anim_timer = read_float();
 
-    // Read int16s (big-endian)
     int16_t level_id = (int16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
     data += 2;
     int16_t map_id = (int16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
@@ -522,50 +505,35 @@ void NetworkClient::HandlePuppetUpdate(const uint8_t *data, int len)
     int16_t anim_id = (int16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
     data += 2;
 
-    // Read uint8s
     uint8_t model_id = data[0];
     uint8_t flags = data[1];
     uint8_t playback_type = data[2];
     uint8_t playback_direction = data[3];
 
-    // Pack data for the message queue
-    // The mod expects:
-    // paramF1-F3: x, y, z
-    // param1-3: yaw, pitch, roll (as float bits in int32)
-    // paramF4-F5: anim_duration, anim_timer
-    // param4: map_id (low 8 bits), level_id (next 8 bits), anim_id (high 16 bits)
-    // param5: playback_type
-    // param6: playback_direction
-
     std::vector<int32_t> payload;
 
-    // Convert floats to int32 for storage in payload (reinterpret as bits)
     int32_t yaw_bits, pitch_bits, roll_bits;
     std::memcpy(&yaw_bits, &yaw, sizeof(float));
     std::memcpy(&pitch_bits, &pitch, sizeof(float));
     std::memcpy(&roll_bits, &roll, sizeof(float));
 
-    payload.push_back(yaw_bits);   // param1
-    payload.push_back(pitch_bits); // param2
-    payload.push_back(roll_bits);  // param3
+    payload.push_back(yaw_bits);
+    payload.push_back(pitch_bits);
+    payload.push_back(roll_bits);
 
-    // Pack map_id, level_id, anim_id into param4
     uint32_t packed = ((uint32_t)(uint16_t)anim_id << 16) |
                       ((uint32_t)(uint8_t)level_id << 8) |
                       ((uint32_t)(uint8_t)map_id);
-    payload.push_back((int32_t)packed); // param4
+    payload.push_back((int32_t)packed);
 
-    payload.push_back((int32_t)playback_type);      // param5
-    payload.push_back((int32_t)playback_direction); // param6
+    payload.push_back((int32_t)playback_type);
+    payload.push_back((int32_t)playback_direction);
 
-    // Create NetEvent with the puppet data
     NetEvent e;
     e.type = PacketType::PuppetUpdate;
     e.playerId = (int)player_id;
     e.intData = payload;
 
-    // Store x, y, z as text data (hacky but we need to pass them somehow)
-    // Actually, let's use a different approach - store them in first 3 float params
     e.floatData.push_back(x);
     e.floatData.push_back(y);
     e.floatData.push_back(z);
@@ -583,7 +551,6 @@ void NetworkClient::HandleLevelOpened(const uint8_t *data, int len)
     if (len < 12)
         return;
 
-    // Manual deserialization: player_id (4) + world_id (4) + jiggy_cost (4)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -601,7 +568,6 @@ void NetworkClient::HandleFileProgressFlags(const uint8_t *data, int len)
     if (len < 4)
         return;
 
-    // Manual deserialization: player_id (4) + byte_count (variable)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -623,7 +589,6 @@ void NetworkClient::HandleAbilityProgress(const uint8_t *data, int len)
     if (len < 4)
         return;
 
-    // Manual deserialization: player_id (4) + byte_count (variable)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -645,7 +610,6 @@ void NetworkClient::HandleHoneycombScore(const uint8_t *data, int len)
     if (len < 4)
         return;
 
-    // Manual deserialization: player_id (4) + byte_count (variable)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -667,7 +631,6 @@ void NetworkClient::HandleMumboScore(const uint8_t *data, int len)
     if (len < 4)
         return;
 
-    // Manual deserialization: player_id (4) + byte_count (variable)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -689,7 +652,6 @@ void NetworkClient::HandleHoneycombCollected(const uint8_t *data, int len)
     if (len < 24)
         return;
 
-    // Manual deserialization: player_id (4) + map_id (4) + honeycomb_id (4) + x (4) + y (4) + z (4)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -716,7 +678,6 @@ void NetworkClient::HandleMumboTokenCollected(const uint8_t *data, int len)
     if (len < 24)
         return;
 
-    // Manual deserialization: player_id (4) + map_id (4) + token_id (4) + x (4) + y (4) + z (4)
     uint32_t player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
                          ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
 
@@ -750,7 +711,7 @@ void NetworkClient::SendNote(int mapId, int levelId, bool isDynamic, int noteInd
 {
     printf("[CLIENT] SendNote: map=%d, level=%d, is_dynamic=%d, note_index=%d\n",
            mapId, levelId, isDynamic, noteIndex);
-    
+
     uint8_t buffer[13];
     std::memcpy(&buffer[0], &mapId, 4);
     std::memcpy(&buffer[4], &levelId, 4);
@@ -795,7 +756,7 @@ void NetworkClient::SendLevelOpened(int worldId, int jiggyCost)
 void NetworkClient::SendPuppetUpdate(const PuppetUpdatePacket &pak)
 {
     std::vector<uint8_t> buffer;
-    buffer.reserve(128); // Reserve enough space
+    buffer.reserve(128);
 
     auto write_float = [&buffer](float f)
     {
@@ -889,6 +850,163 @@ void NetworkClient::SendMumboTokenCollected(int mapId, int tokenId, int x, int y
     std::memcpy(&buffer[12], &y, 4);
     std::memcpy(&buffer[16], &z, 4);
     SendReliablePacket(PacketType::MumboTokenCollected, buffer, 20);
+}
+
+void NetworkClient::HandlePlayerInfoRequest(const uint8_t *data, int len)
+{
+    if (len < 8)
+        return;
+
+    uint32_t target_player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
+                                ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
+
+    uint32_t requester_player_id = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) |
+                                   ((uint32_t)data[6] << 8) | ((uint32_t)data[7]);
+
+    EnqueueEvent(PacketType::PlayerInfoRequest, "", {(int32_t)target_player_id, (int32_t)requester_player_id}, 0);
+}
+
+void NetworkClient::HandlePlayerInfoResponse(const uint8_t *data, int len)
+{
+    if (len < 24)
+        return;
+
+    uint32_t target_player_id = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
+                                ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
+
+    int16_t map_id = ((int16_t)data[4] << 8) | (int16_t)data[5];
+    int16_t level_id = ((int16_t)data[6] << 8) | (int16_t)data[7];
+
+    float x, y, z, yaw;
+    std::memcpy(&x, &data[8], 4);
+    std::memcpy(&y, &data[12], 4);
+    std::memcpy(&z, &data[16], 4);
+    std::memcpy(&yaw, &data[20], 4);
+
+    uint32_t x_int = ((uint32_t)data[8] << 24) | ((uint32_t)data[9] << 16) |
+                     ((uint32_t)data[10] << 8) | (uint32_t)data[11];
+    uint32_t y_int = ((uint32_t)data[12] << 24) | ((uint32_t)data[13] << 16) |
+                     ((uint32_t)data[14] << 8) | (uint32_t)data[15];
+    uint32_t z_int = ((uint32_t)data[16] << 24) | ((uint32_t)data[17] << 16) |
+                     ((uint32_t)data[18] << 8) | (uint32_t)data[19];
+    uint32_t yaw_int = ((uint32_t)data[20] << 24) | ((uint32_t)data[21] << 16) |
+                       ((uint32_t)data[22] << 8) | (uint32_t)data[23];
+
+    std::memcpy(&x, &x_int, 4);
+    std::memcpy(&y, &y_int, 4);
+    std::memcpy(&z, &z_int, 4);
+    std::memcpy(&yaw, &yaw_int, 4);
+
+    std::vector<int32_t> params;
+    params.push_back((int32_t)target_player_id);
+    params.push_back((int32_t)map_id);
+    params.push_back((int32_t)level_id);
+
+    int32_t x_as_int, y_as_int, z_as_int, yaw_as_int;
+    std::memcpy(&x_as_int, &x, 4);
+    std::memcpy(&y_as_int, &y, 4);
+    std::memcpy(&z_as_int, &z, 4);
+    std::memcpy(&yaw_as_int, &yaw, 4);
+
+    params.push_back(x_as_int);
+    params.push_back(y_as_int);
+    params.push_back(z_as_int);
+    params.push_back(yaw_as_int);
+
+    EnqueueEvent(PacketType::PlayerInfoResponse, "", params, 0);
+}
+
+void NetworkClient::HandlePlayerListUpdate(const uint8_t *data, int len)
+{
+    if (len < 4)
+        return;
+
+    uint32_t player_count = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
+                            ((uint32_t)data[2] << 8) | ((uint32_t)data[3]);
+
+    int offset = 4;
+
+    for (uint32_t i = 0; i < player_count && offset < len; i++)
+    {
+        if (offset + 8 > len)
+            break;
+
+        uint32_t player_id = ((uint32_t)data[offset] << 24) | ((uint32_t)data[offset + 1] << 16) |
+                             ((uint32_t)data[offset + 2] << 8) | ((uint32_t)data[offset + 3]);
+        offset += 4;
+
+        uint32_t username_len = ((uint32_t)data[offset] << 24) | ((uint32_t)data[offset + 1] << 16) |
+                                ((uint32_t)data[offset + 2] << 8) | ((uint32_t)data[offset + 3]);
+        offset += 4;
+
+        if (offset + username_len > (uint32_t)len)
+            break;
+
+        std::string username((const char *)(data + offset), username_len);
+        offset += username_len;
+
+        EnqueueEvent(PacketType::PlayerListUpdate, username, {(int32_t)player_id}, player_id);
+    }
+}
+
+void NetworkClient::SendPlayerInfoRequest(uint32_t targetPlayerId, uint32_t requesterPlayerId)
+{
+    uint8_t buffer[8];
+    buffer[0] = (targetPlayerId >> 24) & 0xFF;
+    buffer[1] = (targetPlayerId >> 16) & 0xFF;
+    buffer[2] = (targetPlayerId >> 8) & 0xFF;
+    buffer[3] = targetPlayerId & 0xFF;
+    buffer[4] = (requesterPlayerId >> 24) & 0xFF;
+    buffer[5] = (requesterPlayerId >> 16) & 0xFF;
+    buffer[6] = (requesterPlayerId >> 8) & 0xFF;
+    buffer[7] = requesterPlayerId & 0xFF;
+
+    SendRawPacket(PacketType::PlayerInfoRequest, buffer, 8);
+}
+
+void NetworkClient::SendPlayerInfoResponse(uint32_t targetPlayerId, int16_t mapId, int16_t levelId,
+                                           float x, float y, float z, float yaw)
+{
+    uint8_t buffer[24];
+
+    buffer[0] = (targetPlayerId >> 24) & 0xFF;
+    buffer[1] = (targetPlayerId >> 16) & 0xFF;
+    buffer[2] = (targetPlayerId >> 8) & 0xFF;
+    buffer[3] = targetPlayerId & 0xFF;
+
+    buffer[4] = (mapId >> 8) & 0xFF;
+    buffer[5] = mapId & 0xFF;
+
+    buffer[6] = (levelId >> 8) & 0xFF;
+    buffer[7] = levelId & 0xFF;
+
+    uint32_t x_int, y_int, z_int, yaw_int;
+    std::memcpy(&x_int, &x, 4);
+    std::memcpy(&y_int, &y, 4);
+    std::memcpy(&z_int, &z, 4);
+    std::memcpy(&yaw_int, &yaw, 4);
+
+    buffer[8] = (x_int >> 24) & 0xFF;
+    buffer[9] = (x_int >> 16) & 0xFF;
+    buffer[10] = (x_int >> 8) & 0xFF;
+    buffer[11] = x_int & 0xFF;
+
+    buffer[12] = (y_int >> 24) & 0xFF;
+    buffer[13] = (y_int >> 16) & 0xFF;
+    buffer[14] = (y_int >> 8) & 0xFF;
+    buffer[15] = y_int & 0xFF;
+
+    buffer[16] = (z_int >> 24) & 0xFF;
+    buffer[17] = (z_int >> 16) & 0xFF;
+    buffer[18] = (z_int >> 8) & 0xFF;
+    buffer[19] = z_int & 0xFF;
+
+    buffer[20] = (yaw_int >> 24) & 0xFF;
+    buffer[21] = (yaw_int >> 16) & 0xFF;
+    buffer[22] = (yaw_int >> 8) & 0xFF;
+    buffer[23] = yaw_int & 0xFF;
+
+    SendRawPacket(PacketType::PlayerInfoResponse, buffer, 24);
 }
 
 void NetworkClient::UploadInitialSaveData()

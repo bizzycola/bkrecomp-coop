@@ -1,8 +1,8 @@
 use anyhow::Result;
 use dashmap::DashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -19,7 +19,7 @@ pub struct ServerState {
 
     addr_to_player: DashMap<SocketAddr, u32>,
 
-    next_player_id: AtomicU32
+    next_player_id: AtomicU32,
 }
 
 impl ServerState {
@@ -37,7 +37,7 @@ impl ServerState {
             lobbies,
             players: DashMap::new(),
             addr_to_player: DashMap::new(),
-            next_player_id: AtomicU32::new(1)
+            next_player_id: AtomicU32::new(1),
         }
     }
 
@@ -45,7 +45,11 @@ impl ServerState {
         &self.config
     }
 
-    pub async fn get_or_create_lobby(&self, name: &str, password: &str) -> Result<Arc<RwLock<Lobby>>> {
+    pub async fn get_or_create_lobby(
+        &self,
+        name: &str,
+        password: &str,
+    ) -> Result<Arc<RwLock<Lobby>>> {
         if let Some(lobby) = self.lobbies.get(name) {
             return Ok(lobby.clone());
         }
@@ -54,7 +58,10 @@ impl ServerState {
             anyhow::bail!("Max number of lobbies reached");
         }
 
-        let lobby = Arc::new(RwLock::new(Lobby::new(name.to_string(), password.to_string())));
+        let lobby = Arc::new(RwLock::new(Lobby::new(
+            name.to_string(),
+            password.to_string(),
+        )));
         self.lobbies.insert(name.to_string(), lobby.clone());
 
         info!("Created lobby {}", name);
@@ -70,7 +77,7 @@ impl ServerState {
         &self,
         addr: SocketAddr,
         username: &str,
-        lobby_name: &str
+        lobby_name: &str,
     ) -> Arc<RwLock<Player>> {
         if let Some(player_id) = self.addr_to_player.get(&addr) {
             if let Some(player) = self.players.get(player_id.value()) {
@@ -86,13 +93,16 @@ impl ServerState {
             player_id,
             username.to_string(),
             addr,
-            lobby_name.to_string()
+            lobby_name.to_string(),
         )));
 
         self.players.insert(player_id, player.clone());
         self.addr_to_player.insert(addr, player_id);
 
-        info!("Player {} ({}) joined lobby {}", player_id, username, lobby_name);
+        info!(
+            "Player {} ({}) joined lobby {}",
+            player_id, username, lobby_name
+        );
 
         player
     }
@@ -100,7 +110,11 @@ impl ServerState {
     pub fn get_player_by_addr(&self, addr: &SocketAddr) -> Option<Arc<RwLock<Player>>> {
         self.addr_to_player
             .get(addr)
-            .and_then(|id| self.players.get(id.value()).map(|p|p.clone()))
+            .and_then(|id| self.players.get(id.value()).map(|p| p.clone()))
+    }
+
+    pub async fn get_player_by_id(&self, player_id: u32) -> Option<Arc<RwLock<Player>>> {
+        self.players.get(&player_id).map(|p| p.clone())
     }
 
     pub async fn update_player_last_seen(&self, addr: &SocketAddr) {
@@ -112,7 +126,7 @@ impl ServerState {
     pub async fn cleanup_timed_out_players(&self) {
         let timeout = self.config.server.client_timeout_seconds;
         let mut to_remove = Vec::new();
-        
+
         for entry in self.players.iter() {
             let player = entry.value().read().await;
 
@@ -134,10 +148,17 @@ impl ServerState {
         self.players.remove(&player_id);
         self.addr_to_player.remove(&addr);
 
-        info!("Player {} disconnected from lobby {}", player_id, lobby_name);
+        info!(
+            "Player {} disconnected from lobby {}",
+            player_id, lobby_name
+        );
     }
 
-    pub async fn get_lobby_players_except(&self, lobby_name: &str, except_id: u32) -> Vec<SocketAddr> {
+    pub async fn get_lobby_players_except(
+        &self,
+        lobby_name: &str,
+        except_id: u32,
+    ) -> Vec<SocketAddr> {
         let mut addresses = Vec::new();
 
         for entry in self.players.iter() {
@@ -234,8 +255,8 @@ impl ServerState {
                             lobbies.insert(name.clone(), Arc::new(RwLock::new(lobby)));
 
                             info!("Loaded lobby: {}", name);
-                        },
-                        Err(e) => warn!("Failed to parse lobby file: {:?}: {}", path, e)
+                        }
+                        Err(e) => warn!("Failed to parse lobby file: {:?}: {}", path, e),
                     },
                     Err(e) => warn!("Failed to read lobby file: {:?}: {}", path, e),
                 }

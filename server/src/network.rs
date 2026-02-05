@@ -150,11 +150,19 @@ impl NetworkServer {
                         continue;
                     }
 
-                    if entry.last_send_ms == 0 || now.saturating_sub(entry.last_send_ms) >= RETRY_TIMEOUT_MS {
+                    if entry.last_send_ms == 0
+                        || now.saturating_sub(entry.last_send_ms) >= RETRY_TIMEOUT_MS
+                    {
                         let (addr, seq) = *key;
                         entry.attempts = entry.attempts.saturating_add(1);
                         entry.last_send_ms = now;
-                        resend.push((addr, seq, entry.packet_type, entry.payload.clone(), entry.attempts));
+                        resend.push((
+                            addr,
+                            seq,
+                            entry.packet_type,
+                            entry.payload.clone(),
+                            entry.attempts,
+                        ));
                     }
                 }
 
@@ -230,14 +238,20 @@ impl NetworkServer {
                 if payload.len() >= 4 {
                     let seq = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
                     let mut pending = self.reliable_pending.lock().await;
-                    debug!("reliable ack <- {} seq={} (pending before={})", addr, seq, pending.len());
+                    debug!(
+                        "reliable ack <- {} seq={} (pending before={})",
+                        addr,
+                        seq,
+                        pending.len()
+                    );
                     pending.remove(&(addr, seq));
                 }
                 Some(Vec::new())
             }
-            _ => self
-                .maybe_strip_reliable_prefix(packet_type, payload, addr)
-                .await?,
+            _ => {
+                self.maybe_strip_reliable_prefix(packet_type, payload, addr)
+                    .await?
+            }
         };
 
         if payload_buf_opt.is_none() {
@@ -268,6 +282,10 @@ impl NetworkServer {
             PacketType::PuppetUpdate => self.handle_puppet_update(payload, addr).await?,
             PacketType::PuppetSyncRequest => self.handle_puppet_sync_request(addr).await?,
             PacketType::LevelOpened => self.handle_level_opened(payload, addr).await?,
+            PacketType::PlayerInfoRequest => self.handle_player_info_request(payload, addr).await?,
+            PacketType::PlayerInfoResponse => {
+                self.handle_player_info_response(payload, addr).await?
+            }
             PacketType::ReliableAck => {}
             _ => {
                 debug!("Unknown packet type: {:?} from {}", packet_type, addr);
@@ -335,12 +353,14 @@ impl NetworkServer {
             );
             self.send_packet(PacketType::InitialSaveDataRequest, &[], addr)
                 .await?;
+        } else {
+            self.send_full_lobby_state(&login.lobby_name, addr).await?;
         }
 
         self.broadcast_player_connected(&login.lobby_name, &login.username, player_id, addr)
             .await?;
 
-        self.send_full_lobby_state(&login.lobby_name, addr).await?;
+        self.send_player_list(&login.lobby_name, addr).await?;
 
         Ok(())
     }
@@ -375,19 +395,13 @@ impl NetworkServer {
         };
 
         if added {
-            // Manually serialize broadcast
             let mut payload = Vec::new();
             payload.extend_from_slice(&player_id.to_be_bytes());
             payload.extend_from_slice(&jiggy.jiggy_enum_id.to_be_bytes());
             payload.extend_from_slice(&jiggy.collected_value.to_be_bytes());
 
-            self.broadcast_to_lobby_except(
-                &lobby_name,
-                addr,
-                PacketType::JiggyCollected,
-                &payload,
-            )
-            .await?;
+            self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::JiggyCollected, &payload)
+                .await?;
         }
 
         Ok(())
@@ -426,7 +440,6 @@ impl NetworkServer {
         };
 
         if added {
-            // Manually serialize the broadcast with player_id
             let mut payload = Vec::new();
             payload.extend_from_slice(&player_id.to_be_bytes());
             payload.extend_from_slice(&hc.map_id.to_be_bytes());
@@ -480,7 +493,6 @@ impl NetworkServer {
         };
 
         if added {
-            // Manually serialize broadcast
             let mut payload = Vec::new();
             payload.extend_from_slice(&player_id.to_be_bytes());
             payload.extend_from_slice(&tok.map_id.to_be_bytes());
@@ -532,7 +544,6 @@ impl NetworkServer {
                 level.world_id, level.jiggy_cost, username, lobby_name
             );
 
-            // Manually serialize broadcast
             let mut payload = Vec::new();
             payload.extend_from_slice(&player_id.to_be_bytes());
             payload.extend_from_slice(&level.world_id.to_be_bytes());
@@ -567,7 +578,13 @@ impl NetworkServer {
         let lobby_arc = lobby.unwrap();
         let added = {
             let mut l = lobby_arc.write().await;
-            l.add_collected_note(note.map_id, note.x as i16, note.y as i16, note.z as i16, username.clone())
+            l.add_collected_note(
+                note.map_id,
+                note.x as i16,
+                note.y as i16,
+                note.z as i16,
+                username.clone(),
+            )
         };
 
         if added {
@@ -576,7 +593,6 @@ impl NetworkServer {
                 note.map_id, note.x, note.y, note.z, username, lobby_name
             );
 
-            // Manually serialize broadcast
             let mut payload = Vec::new();
             payload.extend_from_slice(&player_id.to_be_bytes());
             payload.extend_from_slice(&note.map_id.to_be_bytes());
@@ -679,13 +695,46 @@ impl NetworkServer {
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
-        if let Some(lobby_arc) = lobby {
+        let should_send_full_state = if let Some(lobby_arc) = lobby {
             let mut l = lobby_arc.write().await;
 
             if l.update_file_progress_flags(&data.flags) {
+                let was_initial = !l.has_initial_save_data;
                 l.has_initial_save_data = true;
+
+                const FILEPROG_31_MM_OPEN: usize = 0x31;
+                const FILEPROG_39_CCW_OPEN: usize = 0x39;
+                const JIGSAW_COSTS: [i32; 9] = [1, 2, 5, 7, 8, 9, 10, 12, 15];
+
+                for flag_index in FILEPROG_31_MM_OPEN..=FILEPROG_39_CCW_OPEN {
+                    let byte_index = flag_index / 8;
+                    let bit_index = flag_index % 8;
+
+                    if byte_index < data.flags.len() {
+                        let is_set = (data.flags[byte_index] & (1 << bit_index)) != 0;
+                        if is_set {
+                            let world_id = (flag_index - FILEPROG_31_MM_OPEN + 1) as i32;
+                            let jiggy_cost = JIGSAW_COSTS[(world_id - 1) as usize];
+
+                            // Add opened level if not already tracked
+                            if !l.is_level_opened(world_id) {
+                                l.add_opened_level(world_id, jiggy_cost);
+                                info!(
+                                    "Extracted opened level from file progress: World={}, Cost={}",
+                                    world_id, jiggy_cost
+                                );
+                            }
+                        }
+                    }
+                }
+
+                was_initial
+            } else {
+                false
             }
-        }
+        } else {
+            false
+        };
 
         // Manually serialize: player_id + raw bytes
         let mut payload = Vec::new();
@@ -694,6 +743,14 @@ impl NetworkServer {
 
         self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::FileProgressFlags, &payload)
             .await?;
+
+        if should_send_full_state {
+            info!(
+                "Initial save data received from {}, sending full state back",
+                lobby_name
+            );
+            self.send_full_lobby_state(&lobby_name, addr).await?;
+        }
 
         Ok(())
     }
@@ -718,7 +775,6 @@ impl NetworkServer {
             l.update_ability_progress(&data.bytes);
         }
 
-        // Manually serialize: player_id + raw bytes
         let mut payload = Vec::new();
         payload.extend_from_slice(&player_id.to_be_bytes());
         payload.extend_from_slice(&data.bytes);
@@ -744,20 +800,25 @@ impl NetworkServer {
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
-        if let Some(lobby_arc) = lobby {
+        let changed = if let Some(lobby_arc) = lobby {
             let mut l = lobby_arc.write().await;
-            if l.update_honeycomb_score(&data.bytes) {
+            let changed = l.update_honeycomb_score(&data.bytes);
+            if changed {
                 l.has_initial_save_data = true;
             }
+            changed
+        } else {
+            false
+        };
+
+        if changed {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&player_id.to_be_bytes());
+            payload.extend_from_slice(&data.bytes);
+
+            self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::HoneycombScore, &payload)
+                .await?;
         }
-
-        // Manually serialize: player_id + raw bytes
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&player_id.to_be_bytes());
-        payload.extend_from_slice(&data.bytes);
-
-        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::HoneycombScore, &payload)
-            .await?;
 
         Ok(())
     }
@@ -777,20 +838,25 @@ impl NetworkServer {
         };
 
         let lobby = self.state.get_lobby(&lobby_name);
-        if let Some(lobby_arc) = lobby {
+        let changed = if let Some(lobby_arc) = lobby {
             let mut l = lobby_arc.write().await;
-            if l.update_mumbo_score(&data.bytes) {
+            let changed = l.update_mumbo_score(&data.bytes);
+            if changed {
                 l.has_initial_save_data = true;
             }
+            changed
+        } else {
+            false
+        };
+
+        if changed {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&player_id.to_be_bytes());
+            payload.extend_from_slice(&data.bytes);
+
+            self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::MumboScore, &payload)
+                .await?;
         }
-
-        // Manually serialize: player_id + raw bytes
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&player_id.to_be_bytes());
-        payload.extend_from_slice(&data.bytes);
-
-        self.broadcast_to_lobby_except(&lobby_name, addr, PacketType::MumboScore, &payload)
-            .await?;
 
         Ok(())
     }
@@ -953,16 +1019,14 @@ impl NetworkServer {
                 collected_value: jiggy.jiggy_id,
                 collector: jiggy.collected_by.clone(),
             };
-            // Use dummy player_id 0 for historical data
             let jiggy_payload = broadcast.serialize(0);
             self.send_packet_serialized(PacketType::JiggyCollected, &jiggy_payload, addr)
                 .await?;
         }
 
         for hc in &l.collected_honeycombs {
-            // Manual serialization: player_id (dummy 0) + map_id + honeycomb_id + x + y + z
             let mut payload = Vec::new();
-            payload.extend_from_slice(&0u32.to_be_bytes()); // dummy player_id
+            payload.extend_from_slice(&0u32.to_be_bytes());
             payload.extend_from_slice(&hc.map_id.to_be_bytes());
             payload.extend_from_slice(&hc.honeycomb_id.to_be_bytes());
             payload.extend_from_slice(&hc.x.to_be_bytes());
@@ -973,9 +1037,8 @@ impl NetworkServer {
         }
 
         for tok in &l.collected_mumbo_tokens {
-            // Manual serialization: player_id (dummy 0) + map_id + token_id + x + y + z
             let mut payload = Vec::new();
-            payload.extend_from_slice(&0u32.to_be_bytes()); // dummy player_id
+            payload.extend_from_slice(&0u32.to_be_bytes());
             payload.extend_from_slice(&tok.map_id.to_be_bytes());
             payload.extend_from_slice(&tok.token_id.to_be_bytes());
             payload.extend_from_slice(&tok.x.to_be_bytes());
@@ -1027,7 +1090,50 @@ impl NetworkServer {
             PacketType::PlayerConnected,
             &payload,
         )
+        .await?;
+
+        use crate::packets::write_u32_be;
+
+        let mut payload = Vec::new();
+        write_u32_be(&mut payload, 1);
+        write_u32_be(&mut payload, player_id);
+        write_u32_be(&mut payload, username.len() as u32);
+        payload.extend_from_slice(username.as_bytes());
+
+        self.broadcast_to_lobby_except(
+            lobby_name,
+            except_addr,
+            PacketType::PlayerListUpdate,
+            &payload,
+        )
         .await
+    }
+
+    async fn send_player_list(&self, lobby_name: &str, addr: SocketAddr) -> Result<()> {
+        use crate::packets::write_u32_be;
+        use crate::packets::PlayerListEntry;
+
+        let players = self.state.get_lobby_players(lobby_name).await;
+        let player_count = players.len();
+
+        let mut payload = Vec::new();
+        write_u32_be(&mut payload, player_count as u32);
+
+        for player_arc in players {
+            let player = player_arc.read().await;
+            let entry = PlayerListEntry {
+                player_id: player.id,
+                username: player.username.clone(),
+            };
+            payload.extend_from_slice(&entry.serialize());
+        }
+
+        info!(
+            "Sending player list ({} players) to {} in lobby {}",
+            player_count, addr, lobby_name
+        );
+        self.send_packet(PacketType::PlayerListUpdate, &payload, addr)
+            .await
     }
 
     async fn broadcast_to_lobby_except(
@@ -1041,7 +1147,10 @@ impl NetworkServer {
 
         for addr in addresses {
             if addr != except_addr {
-                if let Err(e) = self.send_packet_maybe_reliable(packet_type, payload, addr).await {
+                if let Err(e) = self
+                    .send_packet_maybe_reliable(packet_type, payload, addr)
+                    .await
+                {
                     warn!("Failed to send to {}: {}", addr, e);
                 }
             }
@@ -1056,7 +1165,8 @@ impl NetworkServer {
         payload: &[u8],
         addr: SocketAddr,
     ) -> Result<()> {
-        self.send_packet_maybe_reliable(packet_type, payload, addr).await
+        self.send_packet_maybe_reliable(packet_type, payload, addr)
+            .await
     }
 
     async fn send_packet_maybe_reliable(
@@ -1135,6 +1245,94 @@ impl NetworkServer {
         buf.extend_from_slice(payload);
 
         self.socket.send_to(&buf, addr).await?;
+        Ok(())
+    }
+
+    async fn handle_player_info_request(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
+        use crate::packets::write_u32_be;
+        use crate::packets::PlayerInfoRequest;
+
+        let request = PlayerInfoRequest::deserialize(payload)?;
+
+        let requester = self.state.get_player_by_addr(&addr);
+        if requester.is_none() {
+            return Ok(());
+        }
+
+        let requester_arc = requester.unwrap();
+        let requester_id = {
+            let p = requester_arc.read().await;
+            p.id
+        };
+
+        if let Some(target_player) = self.state.get_player_by_id(request.target_player_id).await {
+            let target_addr = {
+                let p = target_player.read().await;
+                p.address
+            };
+
+            info!(
+                "Forwarding PlayerInfoRequest from player {} (addr {}) to player {} at {}",
+                requester_id, addr, request.target_player_id, target_addr
+            );
+
+            let mut forward_payload = Vec::new();
+            write_u32_be(&mut forward_payload, request.target_player_id);
+            write_u32_be(&mut forward_payload, requester_id);
+
+            self.send_packet(PacketType::PlayerInfoRequest, &forward_payload, target_addr)
+                .await?;
+        } else {
+            debug!(
+                "PlayerInfoRequest target player {} not found",
+                request.target_player_id
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn handle_player_info_response(&self, payload: &[u8], addr: SocketAddr) -> Result<()> {
+        use crate::packets::PlayerInfoResponse;
+
+        let response = PlayerInfoResponse::deserialize(payload)?;
+
+        let responder = self.state.get_player_by_addr(&addr);
+        if responder.is_none() {
+            return Ok(());
+        }
+
+        let responder_arc = responder.unwrap();
+        let responder_id = {
+            let p = responder_arc.read().await;
+            p.id
+        };
+
+        if let Some(requester_player) = self.state.get_player_by_id(response.target_player_id).await
+        {
+            let requester_addr = {
+                let p = requester_player.read().await;
+                p.address
+            };
+
+            info!(
+                "Forwarding PlayerInfoResponse from player {} to player {} at {}",
+                responder_id, response.target_player_id, requester_addr
+            );
+
+            self.send_packet(
+                PacketType::PlayerInfoResponse,
+                &response.serialize(),
+                requester_addr,
+            )
+            .await?;
+        } else {
+            debug!(
+                "PlayerInfoResponse requester {} not found",
+                response.target_player_id
+            );
+        }
+
         Ok(())
     }
 }

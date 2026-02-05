@@ -1,6 +1,5 @@
 ﻿use anyhow::{anyhow, Result};
 
-// Helper function to read big-endian u32
 fn read_u32_be(data: &[u8], offset: usize) -> Result<u32> {
     if offset + 4 > data.len() {
         return Err(anyhow!("Not enough data to read u32"));
@@ -11,12 +10,10 @@ fn read_u32_be(data: &[u8], offset: usize) -> Result<u32> {
         | (data[offset + 3] as u32))
 }
 
-// Helper function to read big-endian i32
 fn read_i32_be(data: &[u8], offset: usize) -> Result<i32> {
     Ok(read_u32_be(data, offset)? as i32)
 }
 
-// Helper function to read little-endian i32
 fn read_i32_le(data: &[u8], offset: usize) -> Result<i32> {
     if offset + 4 > data.len() {
         return Err(anyhow!("Not enough data to read i32"));
@@ -29,7 +26,6 @@ fn read_i32_le(data: &[u8], offset: usize) -> Result<i32> {
     ]))
 }
 
-// Helper function to read little-endian i16
 fn read_i16_le(data: &[u8], offset: usize) -> Result<i16> {
     if offset + 2 > data.len() {
         return Err(anyhow!("Not enough data to read i16"));
@@ -37,15 +33,13 @@ fn read_i16_le(data: &[u8], offset: usize) -> Result<i16> {
     Ok(i16::from_le_bytes([data[offset], data[offset + 1]]))
 }
 
-// Helper function to write big-endian u32
-fn write_u32_be(buf: &mut Vec<u8>, value: u32) {
+pub fn write_u32_be(buf: &mut Vec<u8>, value: u32) {
     buf.push((value >> 24) as u8);
     buf.push((value >> 16) as u8);
     buf.push((value >> 8) as u8);
     buf.push(value as u8);
 }
 
-// Helper function to write big-endian i32
 fn write_i32_be(buf: &mut Vec<u8>, value: i32) {
     write_u32_be(buf, value as u32);
 }
@@ -126,7 +120,6 @@ impl JiggyPacket {
         if data.len() < 8 {
             return Err(anyhow!("Invalid JiggyPacket: expected 8 bytes"));
         }
-        // Client uses std::memcpy (little-endian)
         Ok(JiggyPacket {
             jiggy_enum_id: read_i32_le(data, 0)?,
             collected_value: read_i32_le(data, 4)?,
@@ -145,9 +138,11 @@ pub struct NotePacket {
 impl NotePacket {
     pub fn deserialize(data: &[u8]) -> Result<Self> {
         if data.len() < 13 {
-            return Err(anyhow!("Invalid NotePacket: expected 13 bytes, got {}", data.len()));
+            return Err(anyhow!(
+                "Invalid NotePacket: expected 13 bytes, got {}",
+                data.len()
+            ));
         }
-        // Client sends: mapId(4 LE) + levelId(4 LE) + isDynamic(1) + noteIndex(4 LE)
         Ok(NotePacket {
             map_id: i32::from_le_bytes([data[0], data[1], data[2], data[3]]),
             level_id: i32::from_le_bytes([data[4], data[5], data[6], data[7]]),
@@ -170,7 +165,6 @@ impl NotePacketPos {
         if data.len() < 10 {
             return Err(anyhow!("Invalid NotePacketPos: expected 10 bytes"));
         }
-        // Client sends: mapId(4 LE) + x(2 LE i16) + y(2 LE i16) + z(2 LE i16)
         Ok(NotePacketPos {
             map_id: read_i32_le(data, 0)?,
             x: read_i16_le(data, 4)? as i32,
@@ -191,7 +185,6 @@ impl LevelOpenedPacket {
         if data.len() < 8 {
             return Err(anyhow!("Invalid LevelOpenedPacket: expected 8 bytes"));
         }
-        // Client uses std::memcpy (little-endian)
         Ok(LevelOpenedPacket {
             world_id: read_i32_le(data, 0)?,
             jiggy_cost: read_i32_le(data, 4)?,
@@ -290,7 +283,6 @@ impl HoneycombCollectedPacket {
                 "Invalid HoneycombCollectedPacket: expected 20 bytes"
             ));
         }
-        // Client uses std::memcpy (little-endian)
         Ok(HoneycombCollectedPacket {
             map_id: read_i32_le(data, 0)?,
             honeycomb_id: read_i32_le(data, 4)?,
@@ -317,7 +309,6 @@ impl MumboTokenCollectedPacket {
                 "Invalid MumboTokenCollectedPacket: expected 20 bytes"
             ));
         }
-        // Client uses std::memcpy (little-endian)
         Ok(MumboTokenCollectedPacket {
             map_id: read_i32_le(data, 0)?,
             token_id: read_i32_le(data, 4)?,
@@ -341,7 +332,6 @@ impl NoteSaveDataPacket {
                 "Invalid NoteSaveDataPacket: expected at least 4 bytes"
             ));
         }
-        // Client uses std::memcpy (little-endian)
         Ok(NoteSaveDataPacket {
             level_index: read_i32_le(data, 0)?,
             save_data: data[4..].to_vec(),
@@ -356,7 +346,6 @@ impl NoteSaveDataPacket {
     }
 }
 
-// Broadcast structures for sending
 #[derive(Debug, Clone)]
 pub struct BroadcastJiggy {
     pub jiggy_enum_id: i32,
@@ -455,6 +444,103 @@ pub struct PlayerDisconnectedBroadcast {
 }
 
 impl PlayerDisconnectedBroadcast {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, self.player_id);
+        write_u32_be(&mut buf, self.username.len() as u32);
+        buf.extend_from_slice(self.username.as_bytes());
+        buf
+    }
+}
+
+fn write_f32_be(buf: &mut Vec<u8>, value: f32) {
+    write_u32_be(buf, value.to_bits());
+}
+
+fn read_f32_be(data: &[u8], offset: usize) -> Result<f32> {
+    Ok(f32::from_bits(read_u32_be(data, offset)?))
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerInfoRequest {
+    pub target_player_id: u32,
+    pub requester_player_id: u32,
+}
+
+impl PlayerInfoRequest {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 8 {
+            return Err(anyhow!("Invalid PlayerInfoRequest: expected 8 bytes"));
+        }
+        Ok(PlayerInfoRequest {
+            target_player_id: read_u32_be(data, 0)?,
+            requester_player_id: read_u32_be(data, 4)?,
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, self.target_player_id);
+        write_u32_be(&mut buf, self.requester_player_id);
+        buf
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerInfoResponse {
+    pub target_player_id: u32,
+    pub map_id: i16,
+    pub level_id: i16,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub yaw: f32,
+}
+
+impl PlayerInfoResponse {
+    pub fn deserialize(data: &[u8]) -> Result<Self> {
+        if data.len() < 24 {
+            return Err(anyhow!("Invalid PlayerInfoResponse: expected 24 bytes"));
+        }
+        let target_player_id = read_u32_be(data, 0)?;
+        let map_id = i16::from_be_bytes([data[4], data[5]]);
+        let level_id = i16::from_be_bytes([data[6], data[7]]);
+        let x = read_f32_be(data, 8)?;
+        let y = read_f32_be(data, 12)?;
+        let z = read_f32_be(data, 16)?;
+        let yaw = read_f32_be(data, 20)?;
+
+        Ok(PlayerInfoResponse {
+            target_player_id,
+            map_id,
+            level_id,
+            x,
+            y,
+            z,
+            yaw,
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        write_u32_be(&mut buf, self.target_player_id);
+        buf.extend_from_slice(&self.map_id.to_be_bytes());
+        buf.extend_from_slice(&self.level_id.to_be_bytes());
+        write_f32_be(&mut buf, self.x);
+        write_f32_be(&mut buf, self.y);
+        write_f32_be(&mut buf, self.z);
+        write_f32_be(&mut buf, self.yaw);
+        buf
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerListEntry {
+    pub player_id: u32,
+    pub username: String,
+}
+
+impl PlayerListEntry {
     pub fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         write_u32_be(&mut buf, self.player_id);

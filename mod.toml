@@ -63,8 +63,11 @@ native_libraries = [
         "native_send_mumbo_score",
         "native_send_honeycomb_collected",
         "native_send_mumbo_token_collected",
+        "native_send_player_info_request",
+        "native_send_player_info_response",
         "net_send_puppet_update",
-        "GetClockMS"
+        "GetClockMS",
+        "native_poll_console_input"
     ] }
 ]
 
