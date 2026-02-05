@@ -2,6 +2,7 @@
 #include "ui_context.h"
 #include "recomputils.h"
 #include "modding.h"
+#include "util.h"
 #include <string.h>
 
 static struct
@@ -22,54 +23,16 @@ static struct
 static ConsoleCommand g_commands[CONSOLE_MAX_COMMANDS] = {0};
 static int g_command_count = 0;
 
-static void safe_strcpy(char *dest, const char *src, int max_len)
-{
-    int i;
-    for (i = 0; i < max_len - 1 && src[i] != '\0'; i++)
-    {
-        dest[i] = src[i];
-    }
-    dest[i] = '\0';
-}
-
-static void safe_strcat(char *dest, const char *src, int max_len)
-{
-    int dest_len = 0;
-    while (dest[dest_len] != '\0' && dest_len < max_len - 1)
-    {
-        dest_len++;
-    }
-
-    int i = 0;
-    while (src[i] != '\0' && dest_len < max_len - 1)
-    {
-        dest[dest_len++] = src[i++];
-    }
-    dest[dest_len] = '\0';
-}
-
-static int str_equals(const char *a, const char *b)
-{
-    int i = 0;
-    while (a[i] != '\0' && b[i] != '\0')
-    {
-        if (a[i] != b[i])
-            return 0;
-        i++;
-    }
-    return a[i] == b[i];
-}
-
 static void add_to_history(const char *line)
 {
     if (g_console.history_count < CONSOLE_MAX_HISTORY)
     {
-        safe_strcpy(g_console.history[g_console.history_count], line, CONSOLE_MAX_INPUT);
+        util_safe_strcpy(g_console.history[g_console.history_count], line, CONSOLE_MAX_INPUT);
         g_console.history_count++;
     }
     else
     {
-        safe_strcpy(g_console.history[g_console.history_start], line, CONSOLE_MAX_INPUT);
+        util_safe_strcpy(g_console.history[g_console.history_start], line, CONSOLE_MAX_INPUT);
         g_console.history_start = (g_console.history_start + 1) % CONSOLE_MAX_HISTORY;
     }
     g_console.needs_rebuild = 1;
@@ -123,7 +86,7 @@ static void execute_command(const char *input)
     char cmd_line[CONSOLE_MAX_INPUT + 2];
     cmd_line[0] = '>';
     cmd_line[1] = ' ';
-    safe_strcpy(cmd_line + 2, input, CONSOLE_MAX_INPUT - 2);
+    util_safe_strcpy(cmd_line + 2, input, CONSOLE_MAX_INPUT - 2);
     add_to_history(cmd_line);
 
     // Parse command
@@ -144,7 +107,7 @@ static void execute_command(const char *input)
 
     for (int i = 0; i < g_command_count; i++)
     {
-        if (g_commands[i].is_active && str_equals(g_commands[i].name, argv[0]))
+        if (g_commands[i].is_active && util_str_equals(g_commands[i].name, argv[0]))
         {
             int result = g_commands[i].handler(argc, argv_ptrs);
             if (!result)
@@ -169,12 +132,12 @@ static int cmd_help(int argc, char **argv)
         if (g_commands[i].is_active)
         {
             char line[256];
-            safe_strcpy(line, "  ", 256);
-            safe_strcat(line, g_commands[i].name, 256);
+            util_safe_strcpy(line, "  ", 256);
+            util_safe_strcat(line, g_commands[i].name, 256);
             if (g_commands[i].description)
             {
-                safe_strcat(line, " - ", 256);
-                safe_strcat(line, g_commands[i].description, 256);
+                util_safe_strcat(line, " - ", 256);
+                util_safe_strcat(line, g_commands[i].description, 256);
             }
             console_log(line);
         }
@@ -207,8 +170,8 @@ static int cmd_echo(int argc, char **argv)
     for (int i = 1; i < argc; i++)
     {
         if (i > 1)
-            safe_strcat(message, " ", CONSOLE_MAX_INPUT);
-        safe_strcat(message, argv[i], CONSOLE_MAX_INPUT);
+            util_safe_strcat(message, " ", CONSOLE_MAX_INPUT);
+        util_safe_strcat(message, argv[i], CONSOLE_MAX_INPUT);
     }
 
     console_log(message);
@@ -255,8 +218,8 @@ static void console_create_ui(void)
     char input_display[CONSOLE_MAX_INPUT + 3];
     input_display[0] = '>';
     input_display[1] = ' ';
-    safe_strcpy(input_display + 2, g_console.input_buffer, CONSOLE_MAX_INPUT);
-    safe_strcat(input_display, "_", CONSOLE_MAX_INPUT + 3); // Cursor
+    util_safe_strcpy(input_display + 2, g_console.input_buffer, CONSOLE_MAX_INPUT);
+    util_safe_strcat(input_display, "_", CONSOLE_MAX_INPUT + 3); // Cursor
 
     g_console.input_label = recompui_create_label(ctx, g_console.container, input_display, LABELSTYLE_NORMAL);
     RecompuiColor input_color = {.r = 255, .g = 255, .b = 255, .a = 255};
@@ -291,8 +254,8 @@ static void console_update_ui(void)
     char input_display[CONSOLE_MAX_INPUT + 3];
     input_display[0] = '>';
     input_display[1] = ' ';
-    safe_strcpy(input_display + 2, g_console.input_buffer, CONSOLE_MAX_INPUT);
-    safe_strcat(input_display, "_", CONSOLE_MAX_INPUT + 3);
+    util_safe_strcpy(input_display + 2, g_console.input_buffer, CONSOLE_MAX_INPUT);
+    util_safe_strcat(input_display, "_", CONSOLE_MAX_INPUT + 3);
     recompui_set_text(g_console.input_label, input_display);
 
     ui_context_close();
@@ -399,32 +362,32 @@ void console_log(const char *message)
 void console_log_info(const char *message)
 {
     char line[CONSOLE_MAX_INPUT];
-    safe_strcpy(line, "[INFO] ", CONSOLE_MAX_INPUT);
-    safe_strcat(line, message, CONSOLE_MAX_INPUT);
+    util_safe_strcpy(line, "[INFO] ", CONSOLE_MAX_INPUT);
+    util_safe_strcat(line, message, CONSOLE_MAX_INPUT);
     add_to_history(line);
 }
 
 void console_log_success(const char *message)
 {
     char line[CONSOLE_MAX_INPUT];
-    safe_strcpy(line, "[OK] ", CONSOLE_MAX_INPUT);
-    safe_strcat(line, message, CONSOLE_MAX_INPUT);
+    util_safe_strcpy(line, "[OK] ", CONSOLE_MAX_INPUT);
+    util_safe_strcat(line, message, CONSOLE_MAX_INPUT);
     add_to_history(line);
 }
 
 void console_log_error(const char *message)
 {
     char line[CONSOLE_MAX_INPUT];
-    safe_strcpy(line, "[ERROR] ", CONSOLE_MAX_INPUT);
-    safe_strcat(line, message, CONSOLE_MAX_INPUT);
+    util_safe_strcpy(line, "[ERROR] ", CONSOLE_MAX_INPUT);
+    util_safe_strcat(line, message, CONSOLE_MAX_INPUT);
     add_to_history(line);
 }
 
 void console_log_warning(const char *message)
 {
     char line[CONSOLE_MAX_INPUT];
-    safe_strcpy(line, "[WARN] ", CONSOLE_MAX_INPUT);
-    safe_strcat(line, message, CONSOLE_MAX_INPUT);
+    util_safe_strcpy(line, "[WARN] ", CONSOLE_MAX_INPUT);
+    util_safe_strcat(line, message, CONSOLE_MAX_INPUT);
     add_to_history(line);
 }
 
@@ -433,7 +396,7 @@ int console_register_command(const char *name, ConsoleCommandHandler handler, co
     if (g_command_count >= CONSOLE_MAX_COMMANDS)
         return 0;
 
-    safe_strcpy(g_commands[g_command_count].name, name, CONSOLE_MAX_COMMAND_NAME);
+    util_safe_strcpy(g_commands[g_command_count].name, name, CONSOLE_MAX_COMMAND_NAME);
     g_commands[g_command_count].handler = handler;
     g_commands[g_command_count].description = description;
     g_commands[g_command_count].is_active = 1;

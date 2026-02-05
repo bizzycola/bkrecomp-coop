@@ -20,6 +20,7 @@
 #include "lib_net.h"
 #include "lib_message_queue.h"
 #include "console_input.h"
+#include "util/util.h"
 
 void coop_dll_log(const char *msg)
 {
@@ -39,6 +40,8 @@ void coop_dll_log(const char *msg)
 }
 
 #if defined(_WIN32)
+// tl;dr used to log exceptions when the lib crashes
+// only enable in the next function if needed
 static LONG WINAPI coop_vectored_exception_handler(struct _EXCEPTION_POINTERS *ExceptionInfo)
 {
     if (!ExceptionInfo || !ExceptionInfo->ExceptionRecord)
@@ -158,7 +161,6 @@ static LONG WINAPI coop_vectored_exception_handler(struct _EXCEPTION_POINTERS *E
 
 static void coop_install_vectored_handler_once()
 {
-    // Disabled VEH for now - may be causing issues
     // static std::atomic<int> installed{0};
     // int expected = 0;
     //
@@ -190,25 +192,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 }
 #endif
 
-static inline float swap_float(const uint8_t *ptr)
-{
-    uint32_t val = ((uint32_t)ptr[0] << 24) | ((uint32_t)ptr[1] << 16) |
-                   ((uint32_t)ptr[2] << 8) | ((uint32_t)ptr[3]);
-    float result;
-    memcpy(&result, &val, sizeof(float));
-    return result;
-}
-
-static inline int16_t swap_int16(const uint8_t *ptr)
-{
-    return (int16_t)(((uint16_t)ptr[0] << 8) | ((uint16_t)ptr[1]));
-}
-
-static inline uint16_t swap_uint16(const uint8_t *ptr)
-{
-    return ((uint16_t)ptr[0] << 8) | ((uint16_t)ptr[1]);
-}
-
 extern "C"
 {
     DLLEXPORT uint32_t recomp_api_version = 1;
@@ -216,6 +199,9 @@ extern "C"
 
 static NetworkClient *g_networkClient = nullptr;
 static int g_connect_state = 0;
+
+// Forward declaration for util
+uint8_t PacketTypeToMessageType(PacketType packetType);
 
 RECOMP_DLL_FUNC(native_lib_test)
 {
@@ -226,6 +212,7 @@ RECOMP_DLL_FUNC(native_lib_test)
     RECOMP_RETURN(int, 0);
 }
 
+// polls for network messages
 RECOMP_DLL_FUNC(net_msg_poll)
 {
     PTR(GameMessage)
@@ -239,34 +226,7 @@ RECOMP_DLL_FUNC(net_msg_poll)
     GameMessage msg;
     if (g_messageQueue.Pop(msg))
     {
-        MEM_B(0, buffer_ptr) = msg.type;
-        MEM_W(4, buffer_ptr) = msg.playerId;
-        MEM_W(8, buffer_ptr) = msg.param1;
-        MEM_W(12, buffer_ptr) = msg.param2;
-        MEM_W(16, buffer_ptr) = msg.param3;
-        MEM_W(20, buffer_ptr) = msg.param4;
-        MEM_W(24, buffer_ptr) = msg.param5;
-        MEM_W(28, buffer_ptr) = msg.param6;
-
-        uint32_t f1_bits, f2_bits, f3_bits, f4_bits, f5_bits;
-        memcpy(&f1_bits, &msg.paramF1, sizeof(float));
-        memcpy(&f2_bits, &msg.paramF2, sizeof(float));
-        memcpy(&f3_bits, &msg.paramF3, sizeof(float));
-        memcpy(&f4_bits, &msg.paramF4, sizeof(float));
-        memcpy(&f5_bits, &msg.paramF5, sizeof(float));
-        MEM_W(32, buffer_ptr) = f1_bits;
-        MEM_W(36, buffer_ptr) = f2_bits;
-        MEM_W(40, buffer_ptr) = f3_bits;
-        MEM_W(44, buffer_ptr) = f4_bits;
-        MEM_W(48, buffer_ptr) = f5_bits;
-
-        MEM_H(52, buffer_ptr) = msg.dataSize;
-
-        for (size_t i = 0; i < MAX_MESSAGE_DATA_SIZE; i++)
-        {
-            MEM_B(54 + i, buffer_ptr) = msg.data[i];
-        }
-
+        util::SerializeGameMessageToMemory(rdram, msg, buffer_ptr);
         RECOMP_RETURN(int, 1);
     }
 
@@ -358,7 +318,7 @@ RECOMP_DLL_FUNC(native_connect_to_server)
     RECOMP_RETURN(int, 1);
 }
 
-static uint8_t PacketTypeToMessageType(PacketType packetType)
+uint8_t PacketTypeToMessageType(PacketType packetType)
 {
     switch (packetType)
     {
@@ -446,6 +406,7 @@ static void push_mumbo_token_collected(const MumboTokenCollectedPacket &p)
     g_messageQueue.Push(msg);
 }
 
+// handle network updates (packet receive)
 RECOMP_DLL_FUNC(native_update_network)
 {
     if (g_networkClient != nullptr)
@@ -455,44 +416,8 @@ RECOMP_DLL_FUNC(native_update_network)
         while (g_networkClient->HasEvents())
         {
             NetEvent evt = g_networkClient->PopEvent();
-
             GameMessage msg;
-            memset(&msg, 0, sizeof(GameMessage));
-            msg.type = PacketTypeToMessageType(evt.type);
-            msg.playerId = evt.playerId;
-
-            if (!evt.textData.empty())
-            {
-                size_t copySize = std::min(evt.textData.size(), MAX_MESSAGE_DATA_SIZE - 1);
-                memcpy(msg.data, evt.textData.c_str(), copySize);
-                msg.data[copySize] = '\0';
-                msg.dataSize = (uint16_t)(copySize + 1);
-            }
-
-            if (evt.intData.size() > 0)
-                msg.param1 = evt.intData[0];
-            if (evt.intData.size() > 1)
-                msg.param2 = evt.intData[1];
-            if (evt.intData.size() > 2)
-                msg.param3 = evt.intData[2];
-            if (evt.intData.size() > 3)
-                msg.param4 = evt.intData[3];
-            if (evt.intData.size() > 4)
-                msg.param5 = evt.intData[4];
-            if (evt.intData.size() > 5)
-                msg.param6 = evt.intData[5];
-
-            if (evt.floatData.size() > 0)
-                msg.paramF1 = evt.floatData[0];
-            if (evt.floatData.size() > 1)
-                msg.paramF2 = evt.floatData[1];
-            if (evt.floatData.size() > 2)
-                msg.paramF3 = evt.floatData[2];
-            if (evt.floatData.size() > 3)
-                msg.paramF4 = evt.floatData[3];
-            if (evt.floatData.size() > 4)
-                msg.paramF5 = evt.floatData[4];
-
+            util::ConvertNetEventToGameMessage(evt, msg);
             g_messageQueue.Push(msg);
         }
     }
@@ -500,6 +425,7 @@ RECOMP_DLL_FUNC(native_update_network)
     RECOMP_RETURN(int, 0);
 }
 
+// closes connection and disconnects
 RECOMP_DLL_FUNC(native_disconnect_from_server)
 {
     if (g_networkClient != nullptr)
@@ -514,6 +440,7 @@ RECOMP_DLL_FUNC(native_disconnect_from_server)
     RECOMP_RETURN(int, 1);
 }
 
+// send a collected jiggy
 RECOMP_DLL_FUNC(native_sync_jiggy)
 {
     int jiggyEnumId = RECOMP_ARG(int, 0);
@@ -538,6 +465,7 @@ extern "C" DLLEXPORT int native_get_note_save_data(int levelIndex, unsigned char
     return 0;
 }
 
+// send collected note
 RECOMP_DLL_FUNC(native_sync_note)
 {
     int mapId = RECOMP_ARG(int, 0);
@@ -553,6 +481,7 @@ RECOMP_DLL_FUNC(native_sync_note)
     RECOMP_RETURN(int, 1);
 }
 
+// send when a level was opened
 RECOMP_DLL_FUNC(native_send_level_opened)
 {
     coop_dll_log("[COOP][DLL] native_send_level_opened: enter");
@@ -568,6 +497,9 @@ RECOMP_DLL_FUNC(native_send_level_opened)
     RECOMP_RETURN(int, 1);
 }
 
+// uploads initial save data
+// this is called for the first player to join a lobby
+// to send an initial state which can be synced to other players
 RECOMP_DLL_FUNC(native_upload_initial_save_data)
 {
     coop_dll_log("[COOP][DLL] native_upload_initial_save_data: enter");
@@ -580,6 +512,7 @@ RECOMP_DLL_FUNC(native_upload_initial_save_data)
     RECOMP_RETURN(int, 1);
 }
 
+// send file flags
 RECOMP_DLL_FUNC(native_send_file_progress_flags)
 {
     if (g_networkClient == nullptr)
@@ -596,18 +529,13 @@ RECOMP_DLL_FUNC(native_send_file_progress_flags)
         RECOMP_RETURN(int, 0);
     }
 
-    std::vector<uint8_t> flags;
-    flags.resize((size_t)size);
-    for (int i = 0; i < size; i++)
-    {
-        flags[(size_t)i] = MEM_B(i, bufPtr);
-    }
-
+    std::vector<uint8_t> flags = util::ReadByteBufferFromMemory(rdram, bufPtr, size);
     g_networkClient->SendFileProgressFlags(flags);
 
     RECOMP_RETURN(int, 1);
 }
 
+// send unlocked move state
 RECOMP_DLL_FUNC(native_send_ability_progress)
 {
     if (g_networkClient == nullptr)
@@ -624,17 +552,12 @@ RECOMP_DLL_FUNC(native_send_ability_progress)
         RECOMP_RETURN(int, 0);
     }
 
-    std::vector<uint8_t> bytes;
-    bytes.resize((size_t)size);
-    for (int i = 0; i < size; i++)
-    {
-        bytes[(size_t)i] = MEM_B(i, bufPtr);
-    }
-
+    std::vector<uint8_t> bytes = util::ReadByteBufferFromMemory(rdram, bufPtr, size);
     g_networkClient->SendAbilityProgress(bytes);
     RECOMP_RETURN(int, 1);
 }
 
+// send honeycomb score total
 RECOMP_DLL_FUNC(native_send_honeycomb_score)
 {
     if (g_networkClient == nullptr)
@@ -651,17 +574,12 @@ RECOMP_DLL_FUNC(native_send_honeycomb_score)
         RECOMP_RETURN(int, 0);
     }
 
-    std::vector<uint8_t> bytes;
-    bytes.resize((size_t)size);
-    for (int i = 0; i < size; i++)
-    {
-        bytes[(size_t)i] = MEM_B(i, bufPtr);
-    }
-
+    std::vector<uint8_t> bytes = util::ReadByteBufferFromMemory(rdram, bufPtr, size);
     g_networkClient->SendHoneycombScore(bytes);
     RECOMP_RETURN(int, 1);
 }
 
+// send mumbo score total
 RECOMP_DLL_FUNC(native_send_mumbo_score)
 {
     if (g_networkClient == nullptr)
@@ -678,17 +596,12 @@ RECOMP_DLL_FUNC(native_send_mumbo_score)
         RECOMP_RETURN(int, 0);
     }
 
-    std::vector<uint8_t> bytes;
-    bytes.resize((size_t)size);
-    for (int i = 0; i < size; i++)
-    {
-        bytes[(size_t)i] = MEM_B(i, bufPtr);
-    }
-
+    std::vector<uint8_t> bytes = util::ReadByteBufferFromMemory(rdram, bufPtr, size);
     g_networkClient->SendMumboScore(bytes);
     RECOMP_RETURN(int, 1);
 }
 
+// send a collected honeycomb
 RECOMP_DLL_FUNC(native_send_honeycomb_collected)
 {
     int mapId = RECOMP_ARG(int, 0);
@@ -706,6 +619,7 @@ RECOMP_DLL_FUNC(native_send_honeycomb_collected)
     RECOMP_RETURN(int, 1);
 }
 
+// send a collected mumbo token
 RECOMP_DLL_FUNC(native_send_mumbo_token_collected)
 {
     int mapId = RECOMP_ARG(int, 0);
@@ -723,6 +637,7 @@ RECOMP_DLL_FUNC(native_send_mumbo_token_collected)
     RECOMP_RETURN(int, 1);
 }
 
+// send a teleport request to another player
 RECOMP_DLL_FUNC(native_send_player_info_request)
 {
     uint32_t targetPlayerId = RECOMP_ARG(uint32_t, 0);
@@ -736,6 +651,7 @@ RECOMP_DLL_FUNC(native_send_player_info_request)
     RECOMP_RETURN(int, 1);
 }
 
+// send current map and pos info for teleport requests
 RECOMP_DLL_FUNC(native_send_player_info_response)
 {
     uint32_t targetPlayerId = RECOMP_ARG(uint32_t, 0);
@@ -746,22 +662,16 @@ RECOMP_DLL_FUNC(native_send_player_info_response)
 
     if (g_networkClient != nullptr && posPtr)
     {
-        uint32_t x_bits = MEM_W(0, posPtr);
-        uint32_t y_bits = MEM_W(4, posPtr);
-        uint32_t z_bits = MEM_W(8, posPtr);
-        uint32_t yaw_bits = MEM_W(12, posPtr);
-
-        float x = *reinterpret_cast<float *>(&x_bits);
-        float y = *reinterpret_cast<float *>(&y_bits);
-        float z = *reinterpret_cast<float *>(&z_bits);
-        float yaw = *reinterpret_cast<float *>(&yaw_bits);
-
-        g_networkClient->SendPlayerInfoResponse(targetPlayerId, mapId, levelId, x, y, z, yaw);
+        float position[4];
+        util::ReadFloatsFromMemory(rdram, posPtr, position, 4);
+        g_networkClient->SendPlayerInfoResponse(targetPlayerId, mapId, levelId, 
+                                                 position[0], position[1], position[2], position[3]);
     }
 
     RECOMP_RETURN(int, 1);
 }
 
+// used to broadcast puppet (pos/rot) updates
 RECOMP_DLL_FUNC(net_send_puppet_update)
 {
     void *puppet_data = RECOMP_ARG(void *, 0);
@@ -769,37 +679,14 @@ RECOMP_DLL_FUNC(net_send_puppet_update)
     if (g_networkClient != nullptr && puppet_data != nullptr)
     {
         PuppetUpdatePacket pak;
-
-        uint8_t *byte_ptr = (uint8_t *)puppet_data;
-        float *float_ptr = (float *)puppet_data;
-
-        pak.x = float_ptr[0];
-        pak.y = float_ptr[1];
-        pak.z = float_ptr[2];
-        pak.yaw = float_ptr[3];
-        pak.pitch = float_ptr[4];
-        pak.roll = float_ptr[5];
-        pak.anim_duration = float_ptr[6];
-        pak.anim_timer = float_ptr[7];
-
-        int16_t *int16_ptr_32 = (int16_t *)&byte_ptr[32];
-        pak.level_id = int16_ptr_32[0];
-        pak.map_id = int16_ptr_32[1];
-
-        uint16_t *uint16_ptr_38 = (uint16_t *)&byte_ptr[38];
-        pak.anim_id = uint16_ptr_38[0];
-
-        pak.model_id = byte_ptr[40];
-        pak.flags = byte_ptr[41];
-        pak.playback_type = byte_ptr[43];
-        pak.playback_direction = byte_ptr[42];
-
+        util::DeserializePuppetData(puppet_data, pak);
         g_networkClient->SendPuppetUpdate(pak);
     }
 
     RECOMP_RETURN(int, 1);
 }
 
+// gets client clock (used for sync stuff)
 RECOMP_DLL_FUNC(GetClockMS)
 {
     uint32_t time = 0;
@@ -811,6 +698,7 @@ RECOMP_DLL_FUNC(GetClockMS)
     RECOMP_RETURN(uint32_t, time);
 }
 
+// gets typed characters for console ui
 RECOMP_DLL_FUNC(native_poll_console_input)
 {
     ConsoleInput_Poll();
