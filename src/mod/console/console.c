@@ -311,6 +311,7 @@ void console_init(void)
     console_register_command("help", cmd_help, "Show available commands");
     console_register_command("clear", cmd_clear, "Clear console history");
     console_register_command("echo", cmd_echo, "Echo message");
+    console_register_command("teleport", cmd_teleport, "Teleport to a player by name");
 
     if (!ui_context_is_open())
     {

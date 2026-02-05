@@ -4,11 +4,17 @@ This is the recomp mod code for the Banjo-Kazooie Recomp co-op mod.
 It's based both on the BK mod template, and also the [LT-Schmiddy MM Recomp Mod Template](https://github.com/LT-Schmiddy/SchmiddysMMRecompModTemplate) from which I borrowed all the python build tools.
 
 ## Status
-At the moment, the mod has a functioning server with lobbies, and it syncs collected jiggies.
+Here's what (should) sync so far:
+ * Puppets mostly work (anims a bit jank)
+ * Jiggies
+ * Note syncing works, but is dependent on [this](https://github.com/BanjoRecomp/BanjoRecomp/pull/241) PR on the recomp project being merged.
+ * Mumbo tokens
+ * Empty honeycombs
+ * Opened levels
 
-Puppets are work in progress.
+Includes a playerlist UI. You can click players to teleport to them.
 
-Note syncing works, but is dependent on [this](https://github.com/BanjoRecomp/BanjoRecomp/pull/241) PR on the recomp project being merged.
+There's also a console you can open with tilde which has some debugging commands.
 
 ## Server
 The Rust server for the mod is also included in this repo under the `server/` directory.
